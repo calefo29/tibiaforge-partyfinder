@@ -1,17 +1,37 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
+import { Character, subscribeToUserCharacters } from "@/lib/characters";
 import { Brand } from "../(components)/Brand";
+import { CharacterCard } from "../(components)/CharacterCard";
+import { CharacterModal } from "../(components)/CharacterModal";
 
 export default function PerfilPage() {
   const router = useRouter();
   const { user, loading, signOut } = useAuth();
 
+  const [chars, setChars] = useState<Character[] | null>(null);
+  const [listError, setListError] = useState<string | null>(null);
+  const [modalOpen, setModalOpen] = useState(false);
+
   useEffect(() => {
     if (!loading && !user) router.replace("/login");
   }, [user, loading, router]);
+
+  useEffect(() => {
+    if (!user) return;
+    const unsub = subscribeToUserCharacters(
+      user.uid,
+      (list) => {
+        setChars(list);
+        setListError(null);
+      },
+      (err) => setListError(err.message)
+    );
+    return () => unsub();
+  }, [user]);
 
   const handleLogout = async () => {
     await signOut();
@@ -53,23 +73,57 @@ export default function PerfilPage() {
           </div>
         </div>
 
-        <div className="bg-[var(--background-elev)] border border-[var(--border)] rounded-lg p-6">
-          <h2 className="font-semibold mb-3">Conta criada ✓</h2>
-          <p className="text-sm text-[var(--text-mute)]">
-            Auth funcionando. Próximo passo: cadastro de personagens (nome, vocação, level, servidor).
-          </p>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold">Meus personagens</h2>
+          <button
+            type="button"
+            onClick={() => setModalOpen(true)}
+            className="bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-[#04122a] font-medium px-4 py-2 rounded-md transition text-sm"
+          >
+            + Adicionar personagem
+          </button>
+        </div>
 
-          <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs text-[var(--text-dim)] font-mono">
-            <div>
-              <span className="text-[var(--text-mute)]">UID:</span> {user.uid}
-            </div>
-            <div>
-              <span className="text-[var(--text-mute)]">Provider:</span>{" "}
-              {user.providerData[0]?.providerId ?? "—"}
-            </div>
+        {listError && (
+          <div className="text-sm text-[var(--danger)] bg-[var(--danger)]/10 border border-[var(--danger)]/30 rounded-md px-3 py-2 mb-4">
+            Erro ao carregar personagens: {listError}
           </div>
+        )}
+
+        {chars === null ? (
+          <div className="text-[var(--text-mute)] text-sm py-8 text-center">
+            Carregando personagens…
+          </div>
+        ) : chars.length === 0 ? (
+          <div className="border border-dashed border-[var(--border-strong)] rounded-lg p-12 text-center">
+            <strong className="block text-[15px] mb-1">Nenhum personagem ainda</strong>
+            <p className="text-sm text-[var(--text-mute)]">
+              Clica em &quot;+ Adicionar personagem&quot; pra cadastrar o primeiro.
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+            {chars.map((c) => (
+              <CharacterCard key={c.id} char={c} />
+            ))}
+          </div>
+        )}
+
+        <div className="mt-12 bg-[var(--background-elev)] border border-[var(--border)] rounded-lg p-6 text-sm text-[var(--text-mute)]">
+          A partir destes personagens, o Party Finder vai sugerir PTs ideais para{" "}
+          <strong className="text-[var(--text)]">The Primal Order</strong>,{" "}
+          <strong className="text-[var(--text)]">Soulwar</strong> e{" "}
+          <strong className="text-[var(--text)]">Brakagore</strong> — combinando vocações e levels
+          compatíveis com outros players cadastrados.
+          <div className="mt-3 text-xs text-[var(--text-dim)]">↳ Feature da Semana 2.</div>
         </div>
       </main>
+
+      <CharacterModal
+        open={modalOpen}
+        ownerId={user.uid}
+        onClose={() => setModalOpen(false)}
+      />
     </>
   );
 }
