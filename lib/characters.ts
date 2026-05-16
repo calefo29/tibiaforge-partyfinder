@@ -23,8 +23,9 @@ export const VOCATION_LABELS: Record<Vocation, string> = {
   EM: "Exalted Monk",
 };
 
-export const SERVERS = ["Halorian", "Elysian", "Lunarian", "Serenian"] as const;
-export type Server = (typeof SERVERS)[number];
+// Servidores são carregados dinamicamente via /api/servers (scrape do rubinot.com).
+// Mantemos o type como string pra acomodar novos mundos sem precisar mexer no código.
+export type Server = string;
 
 export type Character = {
   id: string;

@@ -4,12 +4,12 @@ import { useEffect, useState } from "react";
 import { FirebaseError } from "firebase/app";
 import {
   addCharacter,
-  SERVERS,
   VOCATIONS,
   VOCATION_LABELS,
   Vocation,
   Server,
 } from "@/lib/characters";
+import type { ServerInfo, ServersResponse } from "@/app/api/servers/route";
 
 type Props = {
   open: boolean;
@@ -25,6 +25,9 @@ export function CharacterModal({ open, ownerId, onClose, onSuccess }: Props) {
   const [server, setServer] = useState<Server | "">("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  const [servers, setServers] = useState<ServerInfo[]>([]);
+  const [loadingServers, setLoadingServers] = useState(false);
 
   useEffect(() => {
     if (!open) {
@@ -45,6 +48,28 @@ export function CharacterModal({ open, ownerId, onClose, onSuccess }: Props) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setLoadingServers(true);
+    fetch("/api/servers")
+      .then((r) => r.json() as Promise<ServersResponse>)
+      .then((data) => {
+        if (cancelled) return;
+        setServers(data.servers ?? []);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setServers([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingServers(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
 
   if (!open) return null;
 
@@ -175,15 +200,23 @@ export function CharacterModal({ open, ownerId, onClose, onSuccess }: Props) {
             <select
               value={server}
               onChange={(e) => setServer(e.target.value as Server)}
-              className="w-full bg-[var(--background)] border border-[var(--border-strong)] rounded-md px-3 py-2.5 outline-none focus:border-[var(--accent)] transition"
+              disabled={loadingServers}
+              className="w-full bg-[var(--background)] border border-[var(--border-strong)] rounded-md px-3 py-2.5 outline-none focus:border-[var(--accent)] transition disabled:opacity-60"
             >
-              <option value="">Selecione…</option>
-              {SERVERS.map((s) => (
-                <option key={s} value={s}>
-                  {s}
+              <option value="">
+                {loadingServers ? "Carregando servidores…" : "Selecione…"}
+              </option>
+              {servers.map((s) => (
+                <option key={s.name} value={s.name}>
+                  {s.name} · {s.pvp}
                 </option>
               ))}
             </select>
+            {!loadingServers && servers.length > 0 && (
+              <p className="text-xs text-[var(--text-dim)] mt-1">
+                {servers.length} servidores · sincronizado do RubinOT
+              </p>
+            )}
           </div>
 
           {error && (
