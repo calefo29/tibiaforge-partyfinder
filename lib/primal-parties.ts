@@ -29,6 +29,11 @@ export type SlotEntry = {
   ownerId: string;
   status: SlotEntryStatus;
   addedAt: Timestamp | null;
+  // Snapshot opcional — fallback de exibição quando não houver char/pool entry resolvível
+  // (usado por dummies de teste e para entries cujo char foi removido).
+  characterName?: string;
+  vocation?: Vocation;
+  level?: number;
 };
 
 export type Slot = {
@@ -37,7 +42,7 @@ export type Slot = {
   entry: SlotEntry | null;
 };
 
-export type PartyStatus = "forming" | "closed" | "cancelled";
+export type PartyStatus = "forming" | "closed" | "cancelled" | "completed";
 
 export type Requirement<T> = { active: boolean; value: T };
 
@@ -363,6 +368,39 @@ export async function applyToSlot(
   });
 }
 
+/** DEV only: insere um dummy confirmed no slot pra testar fluxos de host. */
+export async function addDummyToSlot(
+  partyId: string,
+  party: PrimalParty,
+  slotIndex: number,
+  dummy: { characterName: string; vocation: Vocation; level: number }
+) {
+  if (party.slots[slotIndex].entry) {
+    throw new Error("Esta vaga já tem alguém.");
+  }
+  const fakeId = `dummy_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+  const slots = party.slots.map((s) =>
+    s.index === slotIndex
+      ? {
+          ...s,
+          entry: {
+            characterId: fakeId,
+            ownerId: fakeId,
+            status: "confirmed" as SlotEntryStatus,
+            addedAt: Timestamp.now(),
+            characterName: dummy.characterName,
+            vocation: dummy.vocation,
+            level: dummy.level,
+          },
+        }
+      : s
+  );
+  await updateDoc(doc(db, "primalParties", partyId), {
+    slots,
+    updatedAt: serverTimestamp(),
+  });
+}
+
 export async function inviteToSlot(
   partyId: string,
   party: PrimalParty,
@@ -441,6 +479,58 @@ export async function setSlotStatus(
     slots,
     updatedAt: serverTimestamp(),
   });
+}
+
+/** Marca a PT como concluída (quest feita) — terminal, não volta. */
+export async function completeParty(partyId: string) {
+  await updateDoc(doc(db, "primalParties", partyId), {
+    status: "completed" as PartyStatus,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+/**
+ * Player sai de PT fechada: libera o slot e reabre a PT pra forming.
+ * Se for o host saindo, transfere host pra um slot restante (random); se não
+ * sobrar ninguém, a PT é cancelada.
+ */
+export async function leaveClosedParty(
+  partyId: string,
+  party: PrimalParty,
+  slotIndex: number
+) {
+  const leaving = party.slots[slotIndex];
+  if (!leaving?.entry) throw new Error("Vaga vazia.");
+  const wasHost = leaving.entry.characterId === party.hostCharacterId;
+
+  const newSlots = party.slots.map((s) =>
+    s.index === slotIndex ? { ...s, entry: null } : s
+  );
+  const remaining = newSlots.filter((s) => s.entry);
+
+  if (remaining.length === 0) {
+    await updateDoc(doc(db, "primalParties", partyId), {
+      status: "cancelled" as PartyStatus,
+      slots: newSlots,
+      updatedAt: serverTimestamp(),
+    });
+    return;
+  }
+
+  const update: Record<string, unknown> = {
+    status: "forming" as PartyStatus,
+    closedAt: null,
+    slots: newSlots,
+    updatedAt: serverTimestamp(),
+  };
+
+  if (wasHost) {
+    const pick = remaining[Math.floor(Math.random() * remaining.length)];
+    update.hostUid = pick.entry!.ownerId;
+    update.hostCharacterId = pick.entry!.characterId;
+  }
+
+  await updateDoc(doc(db, "primalParties", partyId), update);
 }
 
 export async function cancelParty(partyId: string) {

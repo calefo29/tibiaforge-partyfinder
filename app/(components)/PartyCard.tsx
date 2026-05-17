@@ -3,18 +3,22 @@
 import { useMemo, useState } from "react";
 import { Character } from "@/lib/characters";
 import {
+  addDummyToSlot,
   applyToSlot,
   cancelParty,
   checkCandidateForSlot,
   closePartyAndLock,
+  completeParty,
   effectiveMinLevel,
   inviteToSlot,
   isCharEligibleForSlot,
+  leaveClosedParty,
   PrimalParty,
   setSlotStatus,
   Slot,
   withdrawFromSlot,
 } from "@/lib/primal-parties";
+import { Vocation } from "@/lib/characters";
 import {
   PrimalPoolEntry,
   TURNO_ICONS,
@@ -63,6 +67,9 @@ export function PartyCard({
   const allConfirmed = confirmed === party.slots.length;
   const isClosed = party.status === "closed";
   const isCancelled = party.status === "cancelled";
+  const isCompleted = party.status === "completed";
+  const isDev = process.env.NODE_ENV === "development";
+  const mySlot = party.slots.find((s) => s.entry?.ownerId === myUid);
 
   const handleAction = async (fn: () => Promise<void>) => {
     setBusy(true);
@@ -146,6 +153,7 @@ export function PartyCard({
                 ? charById.get(slot.entry.characterId)?.name ??
                   poolEntryByCharId(allPool, slot.entry.characterId)
                     ?.characterName ??
+                  slot.entry.characterName ??
                   null
                 : null
             }
@@ -154,6 +162,7 @@ export function PartyCard({
                 ? charById.get(slot.entry.characterId)?.vocation ??
                   (poolEntryByCharId(allPool, slot.entry.characterId)
                     ?.vocation as string) ??
+                  slot.entry.vocation ??
                   null
                 : null
             }
@@ -161,6 +170,7 @@ export function PartyCard({
               slot.entry
                 ? charById.get(slot.entry.characterId)?.level ??
                   poolEntryByCharId(allPool, slot.entry.characterId)?.level ??
+                  slot.entry.level ??
                   null
                 : null
             }
@@ -192,6 +202,9 @@ export function PartyCard({
               }
               onCancel={() => handleAction(() => cancelParty(party.id))}
               onEdit={onEdit}
+              onDevFill={(idx, dummy) =>
+                handleAction(() => addDummyToSlot(party.id, party, idx, dummy))
+              }
             />
           )}
 
@@ -210,8 +223,87 @@ export function PartyCard({
       )}
 
       {isClosed && (
+        <div className="pt-3 border-t border-[var(--border)] space-y-2">
+          <div className="text-xs text-[var(--ok)] font-semibold flex items-center gap-2">
+            ✓ PT fechada — chars locked
+          </div>
+
+          {isDev && isHost && (
+            <div className="bg-[var(--warn)]/8 border border-dashed border-[var(--warn)]/40 rounded px-2 py-1.5 space-y-1.5">
+              <div className="text-[10px] uppercase tracking-wider text-[var(--warn)] font-bold">
+                🛠 DEV — expulsar de PT fechada
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {party.slots
+                  .filter(
+                    (s) =>
+                      s.entry &&
+                      s.entry.characterId !== party.hostCharacterId
+                  )
+                  .map((s) => (
+                    <button
+                      key={s.index}
+                      type="button"
+                      disabled={busy}
+                      onClick={() =>
+                        handleAction(() =>
+                          leaveClosedParty(party.id, party, s.index)
+                        )
+                      }
+                      className="text-[10px] border border-[var(--danger)]/40 text-[var(--danger)] hover:bg-[var(--danger)]/10 px-2 py-0.5 rounded transition disabled:opacity-50"
+                    >
+                      Expulsar vaga {s.index + 1}
+                    </button>
+                  ))}
+                {party.slots.filter(
+                  (s) =>
+                    s.entry &&
+                    s.entry.characterId !== party.hostCharacterId
+                ).length === 0 && (
+                  <span className="text-[10px] text-[var(--text-mute)]">
+                    nenhum não-host pra expulsar
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            {mySlot ? (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() =>
+                  handleAction(() =>
+                    leaveClosedParty(party.id, party, mySlot.index)
+                  )
+                }
+                className="text-xs border border-[var(--danger)]/40 text-[var(--danger)] hover:bg-[var(--danger)]/10 px-3 py-1.5 rounded transition disabled:opacity-50"
+              >
+                Sair da PT
+              </button>
+            ) : (
+              <span />
+            )}
+            {isHost && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() =>
+                  handleAction(() => completeParty(party.id))
+                }
+                className="text-xs bg-[var(--ok)] hover:brightness-110 text-[#063817] font-semibold px-3 py-1.5 rounded transition disabled:opacity-50"
+              >
+                {busy ? "..." : "✓ Quest Concluída"}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {isCompleted && (
         <div className="pt-3 border-t border-[var(--border)] text-xs text-[var(--ok)] font-semibold flex items-center gap-2">
-          ✓ PT fechada — chars locked
+          🏆 Quest concluída
         </div>
       )}
 
@@ -270,6 +362,13 @@ function StatusBadge({
     return (
       <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-full bg-[var(--ok)]/15 text-[var(--ok)] border border-[var(--ok)]/40 whitespace-nowrap">
         ● Fechada
+      </span>
+    );
+  }
+  if (status === "completed") {
+    return (
+      <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-full bg-[var(--ok)]/15 text-[var(--ok)] border border-[var(--ok)]/40 whitespace-nowrap">
+        🏆 Concluída
       </span>
     );
   }
@@ -379,6 +478,26 @@ function SlotCell({
   );
 }
 
+const DUMMY_NAMES = [
+  "Dummy Bot", "Test Hero", "Mock Char", "Fake Knight", "Sim Druid",
+  "Phantom MS", "Echo RP", "Ghost EM", "Probe Char", "Stub Player",
+];
+function makeDummyForSlot(slotVoc: string): {
+  characterName: string;
+  vocation: Vocation;
+  level: number;
+} {
+  const voc: Vocation =
+    slotVoc === "ANY"
+      ? (["EK", "ED", "MS", "RP", "EM"] as Vocation[])[
+          Math.floor(Math.random() * 5)
+        ]
+      : (slotVoc as Vocation);
+  const name = DUMMY_NAMES[Math.floor(Math.random() * DUMMY_NAMES.length)];
+  const level = 600 + Math.floor(Math.random() * 400);
+  return { characterName: name, vocation: voc, level };
+}
+
 function poolEntryByCharId(
   pool: PrimalPoolEntry[] | undefined,
   charId: string
@@ -395,6 +514,7 @@ function HostActions({
   onClose,
   onCancel,
   onEdit,
+  onDevFill,
 }: {
   party: PrimalParty;
   busy: boolean;
@@ -404,9 +524,20 @@ function HostActions({
   onClose: () => void;
   onCancel: () => void;
   onEdit?: () => void;
+  onDevFill?: (
+    slotIndex: number,
+    dummy: { characterName: string; vocation: Vocation; level: number }
+  ) => void;
 }) {
+  const isDev = process.env.NODE_ENV === "development";
+  const openSlots = party.slots.filter((s) => !s.entry);
   const pendings = party.slots.filter(
     (s) => s.entry?.status === "pending"
+  );
+  const confirmedNonHost = party.slots.filter(
+    (s) =>
+      s.entry?.status === "confirmed" &&
+      s.entry.characterId !== party.hostCharacterId
   );
 
   return (
@@ -444,6 +575,61 @@ function HostActions({
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {confirmedNonHost.length > 0 && (
+        <div className="text-[11px] space-y-1.5">
+          <div className="text-[var(--text-mute)] font-semibold uppercase tracking-wider text-[10px]">
+            Membros confirmados
+          </div>
+          {confirmedNonHost.map((s) => (
+            <div
+              key={s.index}
+              className="flex items-center justify-between gap-2 bg-[var(--ok)]/6 border border-[var(--ok)]/25 rounded px-2 py-1.5"
+            >
+              <span className="text-[11px] text-[var(--text)]">
+                Vaga {s.index + 1} · {s.vocation === "ANY" ? "Flex" : s.vocation}
+              </span>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => onKickSlot(s.index)}
+                className="text-[10px] border border-[var(--danger)]/40 text-[var(--danger)] hover:bg-[var(--danger)]/10 px-2 py-0.5 rounded transition disabled:opacity-50"
+              >
+                Expulsar
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {isDev && openSlots.length > 0 && onDevFill && (
+        <div className="bg-[var(--warn)]/8 border border-dashed border-[var(--warn)]/40 rounded px-2 py-1.5 space-y-1.5">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[10px] uppercase tracking-wider text-[var(--warn)] font-bold">
+              🛠 DEV — adicionar dummy
+            </span>
+            <span className="text-[10px] text-[var(--text-mute)]">
+              só em dev, não vai pra prod
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-1">
+            {openSlots.map((s) => {
+              const dummy = makeDummyForSlot(s.vocation);
+              return (
+                <button
+                  key={s.index}
+                  type="button"
+                  disabled={busy}
+                  onClick={() => onDevFill(s.index, dummy)}
+                  className="text-[10px] border border-[var(--warn)]/50 text-[var(--warn)] hover:bg-[var(--warn)]/15 px-2 py-0.5 rounded transition disabled:opacity-50"
+                >
+                  + vaga {s.index + 1} ({dummy.vocation} {dummy.characterName} {dummy.level})
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
 
