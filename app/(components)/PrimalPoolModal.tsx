@@ -8,12 +8,14 @@ import {
   hazardTier,
   HAZARD_MAX,
   HAZARD_MIN,
+  PrimalPoolEntry,
   PRIMAL_MIN_LEVEL,
   Turno,
   TURNOS,
   TURNO_ICONS,
   TURNO_LABELS,
   TURNO_RANGES,
+  updatePrimalPoolEntry,
 } from "@/lib/primal-pool";
 
 type Props = {
@@ -21,6 +23,7 @@ type Props = {
   ownerId: string;
   characters: Character[];
   alreadyInPool: Set<string>;
+  editing?: PrimalPoolEntry | null;
   onClose: () => void;
 };
 
@@ -39,8 +42,10 @@ export function PrimalPoolModal({
   ownerId,
   characters,
   alreadyInPool,
+  editing,
   onClose,
 }: Props) {
+  const isEdit = !!editing;
   const [step, setStep] = useState<Step>(1);
   const [charId, setCharId] = useState<string | null>(null);
   const [experience, setExperience] = useState<boolean | null>(null);
@@ -61,8 +66,19 @@ export function PrimalPoolModal({
   };
 
   useEffect(() => {
-    if (open) reset();
-  }, [open]);
+    if (!open) return;
+    if (editing) {
+      setStep(2);
+      setCharId(editing.characterId);
+      setExperience(editing.experience);
+      setHazard(editing.hazard);
+      setTurnos(new Set(editing.availability));
+      setBusy(false);
+      setError(null);
+    } else {
+      reset();
+    }
+  }, [open, editing]);
 
   useEffect(() => {
     if (!open) return;
@@ -103,12 +119,20 @@ export function PrimalPoolModal({
       setBusy(true);
       setError(null);
       try {
-        await addToPrimalPool(ownerId, {
-          characterId: selectedChar.id,
-          experience: experience === true,
-          hazard,
-          availability: [...turnos],
-        });
+        if (editing) {
+          await updatePrimalPoolEntry(editing.id, {
+            experience: experience === true,
+            hazard,
+            availability: [...turnos],
+          });
+        } else {
+          await addToPrimalPool(ownerId, {
+            characterId: selectedChar.id,
+            experience: experience === true,
+            hazard,
+            availability: [...turnos],
+          });
+        }
         setSavedCharName(selectedChar.name);
         setStep(3);
       } catch (err) {
@@ -149,9 +173,11 @@ export function PrimalPoolModal({
         <div className="sticky top-0 bg-[var(--background-elev)] z-10 flex items-center justify-between px-5 py-4 border-b border-[var(--border)]">
           <h2 className="text-base font-semibold">
             {step === 3
-              ? "Char adicionado!"
+              ? isEdit
+                ? "Inscrição atualizada!"
+                : "Char adicionado!"
               : selectedChar && step === 2
-                ? `Cadastrar ${selectedChar.name}`
+                ? `${isEdit ? "Editar inscrição · " : "Cadastrar "}${selectedChar.name}`
                 : "Cadastrar char na pool da Primal"}
           </h2>
           <button
@@ -165,7 +191,7 @@ export function PrimalPoolModal({
         </div>
 
         <div className="p-5">
-          {step !== 3 && (
+          {step !== 3 && !isEdit && (
             <div className="flex items-center gap-2 mb-4 text-[11px] uppercase tracking-wider text-[var(--text-dim)]">
               <StepPill n={1} current={step} label="Escolha" />
               <span className="text-[var(--text-dim)]">→</span>
@@ -205,29 +231,39 @@ export function PrimalPoolModal({
                 ✓
               </div>
               <h3 className="text-[var(--ok)] text-lg font-semibold mb-1">
-                Char adicionado à pool!
+                {isEdit ? "Inscrição atualizada!" : "Char adicionado à pool!"}
               </h3>
               <p className="text-sm text-[var(--text-mute)] leading-relaxed">
-                <strong className="text-[var(--text)]">{savedCharName}</strong> agora
-                aparece pros líderes formarem PT de Primal.
+                <strong className="text-[var(--text)]">{savedCharName}</strong>{" "}
+                {isEdit
+                  ? "teve a inscrição na pool atualizada."
+                  : "agora aparece pros líderes formarem PT de Primal."}
               </p>
-              <p className="text-xs text-[var(--text-dim)] mt-3">
-                Pra ajustar disponibilidade ou hazard, edite a inscrição no hub da
-                Primal.
-              </p>
+              {!isEdit && (
+                <p className="text-xs text-[var(--text-dim)] mt-3">
+                  Pra ajustar disponibilidade ou hazard, edite a inscrição no hub da
+                  Primal.
+                </p>
+              )}
 
               <div className="flex flex-wrap justify-center gap-2.5 mt-6">
-                <button
-                  type="button"
-                  onClick={reset}
-                  className="bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-[#04122a] font-medium px-4 py-2 rounded-md transition text-sm"
-                >
-                  + Adicionar novo personagem
-                </button>
+                {!isEdit && (
+                  <button
+                    type="button"
+                    onClick={reset}
+                    className="bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-[#04122a] font-medium px-4 py-2 rounded-md transition text-sm"
+                  >
+                    + Adicionar novo personagem
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={onClose}
-                  className="border border-[var(--border-strong)] hover:border-[var(--accent-dim)] hover:bg-[var(--background-elev-2)] text-[var(--text)] px-4 py-2 rounded-md transition text-sm"
+                  className={`px-4 py-2 rounded-md transition text-sm font-medium ${
+                    isEdit
+                      ? "bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-[#04122a]"
+                      : "border border-[var(--border-strong)] hover:border-[var(--accent-dim)] hover:bg-[var(--background-elev-2)] text-[var(--text)]"
+                  }`}
                 >
                   Fechar
                 </button>
@@ -239,12 +275,14 @@ export function PrimalPoolModal({
         {step !== 3 && (
           <div className="sticky bottom-0 bg-[var(--background-elev)] flex items-center justify-between gap-2 px-5 py-3 border-t border-[var(--border)]">
             <span className="text-[11px] text-[var(--text-mute)]">
-              {step === 1
-                ? "Passo 1 de 2 · escolher char"
-                : "Passo 2 de 2 · detalhes da inscrição"}
+              {isEdit
+                ? "Editar inscrição"
+                : step === 1
+                  ? "Passo 1 de 2 · escolher char"
+                  : "Passo 2 de 2 · detalhes da inscrição"}
             </span>
             <div className="flex gap-2">
-              {step === 2 && (
+              {step === 2 && !isEdit && (
                 <button
                   type="button"
                   onClick={goBack}
@@ -254,7 +292,7 @@ export function PrimalPoolModal({
                   ← Voltar
                 </button>
               )}
-              {step === 1 && (
+              {(step === 1 || isEdit) && (
                 <button
                   type="button"
                   onClick={onClose}
@@ -274,8 +312,10 @@ export function PrimalPoolModal({
                 {step === 1
                   ? "Continuar →"
                   : busy
-                    ? "Adicionando…"
-                    : "Adicionar à pool"}
+                    ? "Salvando…"
+                    : isEdit
+                      ? "Salvar alterações"
+                      : "Adicionar à pool"}
               </button>
             </div>
           </div>

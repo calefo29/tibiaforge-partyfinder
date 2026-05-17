@@ -31,7 +31,23 @@ export default function PrimalHubPage() {
   const [chars, setChars] = useState<Character[] | null>(null);
   const [pool, setPool] = useState<PrimalPoolEntry[] | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
+  const [editingEntry, setEditingEntry] = useState<PrimalPoolEntry | null>(null);
   const [removingId, setRemovingId] = useState<string | null>(null);
+
+  const openCreate = () => {
+    setEditingEntry(null);
+    setModalOpen(true);
+  };
+
+  const openEdit = (entry: PrimalPoolEntry) => {
+    setEditingEntry(entry);
+    setModalOpen(true);
+  };
+
+  const closeModal = () => {
+    setModalOpen(false);
+    setEditingEntry(null);
+  };
 
   useEffect(() => {
     if (!loading && !user) router.replace("/login");
@@ -115,7 +131,7 @@ export default function PrimalHubPage() {
           <div className="flex gap-2">
             <button
               type="button"
-              onClick={() => setModalOpen(true)}
+              onClick={openCreate}
               disabled={!chars}
               className="bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-[#04122a] font-medium px-4 py-2 rounded-md transition text-sm disabled:opacity-60"
             >
@@ -123,6 +139,73 @@ export default function PrimalHubPage() {
             </button>
           </div>
         </div>
+
+        {/* Meus chars na pool — vem primeiro, full width */}
+        <section className="mb-8">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h2 className="text-base font-semibold">Meus chars na pool</h2>
+              <p className="text-xs text-[var(--text-mute)] mt-0.5">
+                Chars seus disponíveis pros líderes formarem PT de Primal.
+              </p>
+            </div>
+          </div>
+
+          {pool === null || chars === null ? (
+            <div className="text-center text-sm text-[var(--text-mute)] py-10">
+              Carregando pool…
+            </div>
+          ) : pool.length === 0 ? (
+            <div className="border border-dashed border-[var(--border-strong)] rounded-xl p-10 text-center">
+              <strong className="block text-[15px] mb-1">
+                Nenhum char na pool ainda
+              </strong>
+              <p className="text-sm text-[var(--text-mute)] mb-4">
+                Cadastra um char pra ele ficar disponível pros líderes formarem PT.
+              </p>
+              <button
+                type="button"
+                onClick={openCreate}
+                className="bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-[#04122a] font-medium px-4 py-2 rounded-md transition text-sm"
+              >
+                + Cadastrar primeiro char
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+              {pool.map((entry) => {
+                const ch = charsById.get(entry.characterId);
+                if (!ch) {
+                  return (
+                    <div
+                      key={entry.id}
+                      className="bg-[var(--background-elev)] border border-[var(--border)] rounded-lg p-4 text-sm text-[var(--text-mute)]"
+                    >
+                      Personagem removido — esta inscrição pode ser excluída.
+                      <button
+                        type="button"
+                        onClick={() => handleRemove(entry.id)}
+                        className="block mt-2 text-xs text-[var(--danger)] hover:underline"
+                      >
+                        Remover da pool
+                      </button>
+                    </div>
+                  );
+                }
+                return (
+                  <PoolCard
+                    key={entry.id}
+                    entry={entry}
+                    ch={ch}
+                    removing={removingId === entry.id}
+                    onEdit={() => openEdit(entry)}
+                    onRemove={() => handleRemove(entry.id)}
+                  />
+                );
+              })}
+            </div>
+          )}
+        </section>
 
         {/* Two-column grid */}
         <div className="grid grid-cols-1 lg:grid-cols-[1.4fr_1fr] gap-5">
@@ -163,72 +246,6 @@ export default function PrimalHubPage() {
             />
           </aside>
         </div>
-
-        {/* Meus chars na pool — full width */}
-        <section className="mt-8">
-          <div className="flex items-center justify-between mb-3">
-            <div>
-              <h2 className="text-base font-semibold">Meus chars na pool</h2>
-              <p className="text-xs text-[var(--text-mute)] mt-0.5">
-                Chars seus disponíveis pros líderes formarem PT de Primal.
-              </p>
-            </div>
-          </div>
-
-          {pool === null || chars === null ? (
-            <div className="text-center text-sm text-[var(--text-mute)] py-10">
-              Carregando pool…
-            </div>
-          ) : pool.length === 0 ? (
-            <div className="border border-dashed border-[var(--border-strong)] rounded-xl p-10 text-center">
-              <strong className="block text-[15px] mb-1">
-                Nenhum char na pool ainda
-              </strong>
-              <p className="text-sm text-[var(--text-mute)] mb-4">
-                Cadastra um char pra ele ficar disponível pros líderes formarem PT.
-              </p>
-              <button
-                type="button"
-                onClick={() => setModalOpen(true)}
-                className="bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-[#04122a] font-medium px-4 py-2 rounded-md transition text-sm"
-              >
-                + Cadastrar primeiro char
-              </button>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-              {pool.map((entry) => {
-                const ch = charsById.get(entry.characterId);
-                if (!ch) {
-                  return (
-                    <div
-                      key={entry.id}
-                      className="bg-[var(--background-elev)] border border-[var(--border)] rounded-lg p-4 text-sm text-[var(--text-mute)]"
-                    >
-                      Personagem removido — esta inscrição pode ser excluída.
-                      <button
-                        type="button"
-                        onClick={() => handleRemove(entry.id)}
-                        className="block mt-2 text-xs text-[var(--danger)] hover:underline"
-                      >
-                        Remover da pool
-                      </button>
-                    </div>
-                  );
-                }
-                return (
-                  <PoolCard
-                    key={entry.id}
-                    entry={entry}
-                    ch={ch}
-                    removing={removingId === entry.id}
-                    onRemove={() => handleRemove(entry.id)}
-                  />
-                );
-              })}
-            </div>
-          )}
-        </section>
       </div>
 
       <PrimalPoolModal
@@ -236,7 +253,8 @@ export default function PrimalHubPage() {
         ownerId={user.uid}
         characters={chars ?? []}
         alreadyInPool={alreadyInPool}
-        onClose={() => setModalOpen(false)}
+        editing={editingEntry}
+        onClose={closeModal}
       />
     </AppShell>
   );
@@ -320,11 +338,13 @@ function PoolCard({
   entry,
   ch,
   removing,
+  onEdit,
   onRemove,
 }: {
   entry: PrimalPoolEntry;
   ch: Character;
   removing: boolean;
+  onEdit: () => void;
   onRemove: () => void;
 }) {
   const vocColor = VOC_COLORS[ch.vocation] ?? "text-[var(--accent)]";
@@ -368,14 +388,26 @@ function PoolCard({
         ))}
       </div>
 
-      <div className="flex justify-end pt-3 border-t border-[var(--border)]">
+      <div className="flex justify-end gap-2 pt-3 border-t border-[var(--border)]">
+        <button
+          type="button"
+          onClick={onEdit}
+          disabled={removing}
+          className="text-xs flex items-center gap-1.5 border border-[var(--border-strong)] hover:border-[var(--accent-dim)] hover:bg-[var(--background-elev-2)] text-[var(--text)] px-3 py-1.5 rounded transition disabled:opacity-60"
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+          </svg>
+          Editar
+        </button>
         <button
           type="button"
           onClick={onRemove}
           disabled={removing}
           className="text-xs border border-[var(--danger)]/40 text-[var(--danger)] hover:bg-[var(--danger)]/10 hover:border-[var(--danger)] px-3 py-1.5 rounded transition disabled:opacity-60"
         >
-          {removing ? "Removendo…" : "Remover da pool"}
+          {removing ? "Removendo…" : "Remover"}
         </button>
       </div>
     </div>
