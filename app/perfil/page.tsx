@@ -1,17 +1,25 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { Character, subscribeToUserCharacters } from "@/lib/characters";
-import { Brand } from "../(components)/Brand";
+import { AppShell } from "../(components)/AppShell";
 import { CharacterCard } from "../(components)/CharacterCard";
 import { CharacterModal } from "../(components)/CharacterModal";
 
 export default function PerfilPage() {
+  return (
+    <Suspense fallback={null}>
+      <PerfilContent />
+    </Suspense>
+  );
+}
+
+function PerfilContent() {
   const router = useRouter();
-  const { user, loading, signOut } = useAuth();
+  const searchParams = useSearchParams();
+  const { user, loading } = useAuth();
 
   const [chars, setChars] = useState<Character[] | null>(null);
   const [listError, setListError] = useState<string | null>(null);
@@ -31,6 +39,9 @@ export default function PerfilPage() {
   const closeModal = () => {
     setModalOpen(false);
     setEditing(null);
+    if (searchParams.get("new") === "1") {
+      router.replace("/perfil");
+    }
   };
 
   useEffect(() => {
@@ -50,10 +61,12 @@ export default function PerfilPage() {
     return () => unsub();
   }, [user]);
 
-  const handleLogout = async () => {
-    await signOut();
-    router.replace("/login");
-  };
+  useEffect(() => {
+    if (user && searchParams.get("new") === "1") {
+      setEditing(null);
+      setModalOpen(true);
+    }
+  }, [user, searchParams]);
 
   if (loading || !user) {
     return (
@@ -66,18 +79,8 @@ export default function PerfilPage() {
   const initial = (user.displayName || user.email || "?").charAt(0).toUpperCase();
 
   return (
-    <>
-      <nav className="sticky top-0 z-10 bg-[var(--background)]/90 backdrop-blur border-b border-[var(--border)] px-8 py-3.5 flex items-center justify-between">
-        <Brand />
-        <button
-          onClick={handleLogout}
-          className="text-sm text-[var(--text-mute)] hover:text-[var(--text)] border border-[var(--border-strong)] hover:border-[var(--accent-dim)] rounded-md px-4 py-1.5 transition"
-        >
-          Sair
-        </button>
-      </nav>
-
-      <main className="max-w-[1200px] mx-auto px-8 py-12">
+    <AppShell>
+      <div className="max-w-[1100px] mx-auto px-8 py-10">
         <div className="flex items-center gap-5 mb-10">
           <div className="w-16 h-16 rounded-full flex items-center justify-center text-2xl font-semibold bg-gradient-to-br from-[var(--accent-dim)] to-[var(--background-elev-2)]">
             {initial}
@@ -125,27 +128,7 @@ export default function PerfilPage() {
             ))}
           </div>
         )}
-
-        <div className="mt-12 bg-gradient-to-br from-[var(--accent)]/6 to-[var(--accent)]/0 border border-[var(--border)] rounded-lg p-6">
-          <div className="flex items-center justify-between gap-4 flex-wrap">
-            <div>
-              <h3 className="text-base font-semibold mb-1">
-                The Primal Order — pool de chars
-              </h3>
-              <p className="text-sm text-[var(--text-mute)]">
-                Cadastre seus chars na pool da Primal pra ficarem disponíveis pros líderes
-                formarem PT.
-              </p>
-            </div>
-            <Link
-              href="/quest/primal"
-              className="bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-[#04122a] font-medium px-4 py-2 rounded-md transition text-sm whitespace-nowrap"
-            >
-              Ir pro hub →
-            </Link>
-          </div>
-        </div>
-      </main>
+      </div>
 
       <CharacterModal
         open={modalOpen}
@@ -153,6 +136,6 @@ export default function PerfilPage() {
         editing={editing}
         onClose={closeModal}
       />
-    </>
+    </AppShell>
   );
 }
