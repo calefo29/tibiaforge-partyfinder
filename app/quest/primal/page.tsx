@@ -101,6 +101,12 @@ export default function PrimalHubPage() {
 
   const myUid = user?.uid ?? "";
 
+  const myPoolByCharId = useMemo(() => {
+    const m = new Map<string, PrimalPoolEntry>();
+    (pool ?? []).forEach((e) => m.set(e.characterId, e));
+    return m;
+  }, [pool]);
+
   const myActiveParties = useMemo(() => {
     if (!myUid) return [];
     const seen = new Set<string>();
@@ -349,6 +355,7 @@ export default function PrimalHubPage() {
                     party={p}
                     myUid={myUid}
                     myChars={chars ?? []}
+                    myPoolByCharId={myPoolByCharId}
                     charById={charsById}
                     hostChar={charsById.get(p.hostCharacterId) ?? null}
                   />
@@ -407,6 +414,7 @@ export default function PrimalHubPage() {
                     party={p}
                     myUid={myUid}
                     myChars={chars ?? []}
+                    myPoolByCharId={myPoolByCharId}
                     charById={charsById}
                     hostChar={charsById.get(p.hostCharacterId) ?? null}
                   />

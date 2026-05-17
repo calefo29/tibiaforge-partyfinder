@@ -5,13 +5,19 @@ import { Character } from "@/lib/characters";
 import {
   applyToSlot,
   cancelParty,
-  canVocFillSlot,
   closePartyAndLock,
+  effectiveMinLevel,
+  isCharEligibleForSlot,
   PrimalParty,
   setSlotStatus,
   Slot,
   withdrawFromSlot,
 } from "@/lib/primal-parties";
+import {
+  PrimalPoolEntry,
+  TURNO_ICONS,
+  TURNO_LABELS,
+} from "@/lib/primal-pool";
 
 const VOC_COLORS: Record<string, string> = {
   EK: "text-[#fbbf24]",
@@ -25,11 +31,19 @@ type Props = {
   party: PrimalParty;
   myUid: string;
   myChars: Character[];
+  myPoolByCharId: Map<string, PrimalPoolEntry>;
   charById: Map<string, Character>;
   hostChar: Character | null;
 };
 
-export function PartyCard({ party, myUid, myChars, charById, hostChar }: Props) {
+export function PartyCard({
+  party,
+  myUid,
+  myChars,
+  myPoolByCharId,
+  charById,
+  hostChar,
+}: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pickerSlot, setPickerSlot] = useState<number | null>(null);
@@ -85,9 +99,8 @@ export function PartyCard({ party, myUid, myChars, charById, hostChar }: Props) 
           </div>
           <div className="flex gap-3 flex-wrap text-[11px] text-[var(--text-mute)] mt-1">
             <span>📍 {party.server}</span>
-            <span>🛡️ Mín. {party.minLevel}</span>
-            {party.schedule && <span>🕒 {party.schedule}</span>}
           </div>
+          <RequirementChips party={party} />
         </div>
         <StatusBadge
           status={party.status}
@@ -171,6 +184,7 @@ export function PartyCard({ party, myUid, myChars, charById, hostChar }: Props) 
           party={party}
           slotIndex={pickerSlot}
           myChars={myChars}
+          myPoolByCharId={myPoolByCharId}
           onCancel={() => setPickerSlot(null)}
           onPick={async (charId) => {
             setPickerSlot(null);
@@ -477,32 +491,35 @@ function SlotPicker({
   party,
   slotIndex,
   myChars,
+  myPoolByCharId,
   onCancel,
   onPick,
 }: {
   party: PrimalParty;
   slotIndex: number;
   myChars: Character[];
+  myPoolByCharId: Map<string, PrimalPoolEntry>;
   onCancel: () => void;
   onPick: (charId: string) => void;
 }) {
   const slot = party.slots[slotIndex];
-  const usedCharIds = useMemo(
+  const minLevel = effectiveMinLevel(party);
+
+  const evaluated = useMemo(
     () =>
-      new Set(
-        party.slots
-          .filter((s) => s.entry)
-          .map((s) => s.entry!.characterId)
-      ),
-    [party]
+      myChars.map((c) => {
+        const eligibility = isCharEligibleForSlot(
+          c,
+          myPoolByCharId.get(c.id),
+          party,
+          slotIndex
+        );
+        return { char: c, ...eligibility };
+      }),
+    [myChars, myPoolByCharId, party, slotIndex]
   );
-  const eligible = myChars.filter((c) => {
-    if (c.questHistory?.primal === true) return false;
-    if (c.level < party.minLevel) return false;
-    if (!canVocFillSlot(c.vocation, slot.vocation)) return false;
-    if (usedCharIds.has(c.id)) return false;
-    return true;
-  });
+  const eligible = evaluated.filter((e) => e.ok);
+  const blocked = evaluated.filter((e) => !e.ok);
 
   return (
     <div
@@ -510,7 +527,7 @@ function SlotPicker({
       onClick={onCancel}
     >
       <div
-        className="w-full max-w-[440px] bg-[var(--background-elev)] border border-[var(--border)] rounded-xl p-5 shadow-2xl"
+        className="w-full max-w-[480px] max-h-[90vh] overflow-y-auto bg-[var(--background-elev)] border border-[var(--border)] rounded-xl p-5 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <h3 className="text-sm font-semibold mb-1">
@@ -521,7 +538,7 @@ function SlotPicker({
           <strong className="text-[var(--text)]">
             {slot.vocation === "ANY" ? "Flex (qualquer)" : slot.vocation}
           </strong>{" "}
-          · Mín. level {party.minLevel}
+          · Mín. level {minLevel} · Servidor {party.server}
         </p>
 
         {eligible.length === 0 ? (
@@ -530,7 +547,7 @@ function SlotPicker({
           </div>
         ) : (
           <div className="space-y-2 mb-4">
-            {eligible.map((c) => {
+            {eligible.map(({ char: c }) => {
               const vocColor = VOC_COLORS[c.vocation] ?? "text-[var(--accent)]";
               return (
                 <button
@@ -558,6 +575,26 @@ function SlotPicker({
           </div>
         )}
 
+        {blocked.length > 0 && (
+          <details className="text-xs text-[var(--text-mute)] mb-4">
+            <summary className="cursor-pointer hover:text-[var(--text)]">
+              {blocked.length} char(s) não elegível(eis) — ver motivos
+            </summary>
+            <div className="mt-2 space-y-1 pl-2">
+              {blocked.map(({ char: c, reason }) => (
+                <div key={c.id} className="flex justify-between gap-2 py-1 border-b border-[var(--border)] last:border-0">
+                  <span className="truncate">
+                    {c.vocation} {c.name} ({c.level})
+                  </span>
+                  <span className="text-[var(--danger)] text-[10px] whitespace-nowrap">
+                    {reason}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </details>
+        )}
+
         <div className="flex justify-end gap-2">
           <button
             type="button"
@@ -568,6 +605,43 @@ function SlotPicker({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function RequirementChips({ party }: { party: PrimalParty }) {
+  const r = party.requirements;
+  const chips: { icon: string; label: string }[] = [];
+  if (r.minLevel.active) {
+    chips.push({ icon: "🛡️", label: `Level ≥ ${r.minLevel.value}` });
+  }
+  if (r.minHazard.active) {
+    chips.push({ icon: "🔥", label: `Hazard ≥ ${r.minHazard.value}` });
+  }
+  if (r.schedule.active && r.schedule.value.length > 0) {
+    const turnos = r.schedule.value
+      .map((t) => `${TURNO_ICONS[t]} ${TURNO_LABELS[t]}`)
+      .join(" · ");
+    chips.push({ icon: "🕒", label: turnos });
+  }
+  if (chips.length === 0) {
+    return (
+      <div className="mt-1.5 text-[10px] text-[var(--text-dim)]">
+        Sem filtros · qualquer char elegível pode candidatar
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-wrap gap-1.5 mt-1.5">
+      {chips.map((c, i) => (
+        <span
+          key={i}
+          className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border border-[var(--accent)]/40 bg-[var(--accent)]/8 text-[var(--accent)]"
+        >
+          <span>{c.icon}</span>
+          <span>{c.label}</span>
+        </span>
+      ))}
     </div>
   );
 }

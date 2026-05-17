@@ -12,7 +12,8 @@ import {
   writeBatch,
 } from "firebase/firestore";
 import { db } from "./firebase";
-import { Vocation } from "./characters";
+import { Character, Vocation } from "./characters";
+import { PrimalPoolEntry, Turno } from "./primal-pool";
 
 export const PRIMAL_PARTY_SIZE = 5;
 export const PRIMAL_PARTY_MIN_LEVEL = 600;
@@ -38,14 +39,27 @@ export type Slot = {
 
 export type PartyStatus = "forming" | "closed" | "cancelled";
 
+export type Requirement<T> = { active: boolean; value: T };
+
+export type PartyRequirements = {
+  minLevel: Requirement<number>;
+  minHazard: Requirement<number>;
+  schedule: Requirement<Turno[]>;
+};
+
+export const DEFAULT_REQUIREMENTS: PartyRequirements = {
+  minLevel: { active: true, value: PRIMAL_PARTY_MIN_LEVEL },
+  minHazard: { active: false, value: 0 },
+  schedule: { active: false, value: [] },
+};
+
 export type PrimalParty = {
   id: string;
   hostUid: string;
   hostCharacterId: string;
   server: string;
-  minLevel: number;
-  schedule: string;
   notes: string;
+  requirements: PartyRequirements;
   status: PartyStatus;
   slots: Slot[];
   createdAt: Timestamp | null;
@@ -58,32 +72,38 @@ export type CreatePartyInput = {
   hostCharacterId: string;
   hostVocation: Vocation;
   server: string;
-  minLevel: number;
-  schedule: string;
   notes: string;
+  requirements: PartyRequirements;
+  slotComposition: SlotVocation[];
 };
 
 const partiesCol = () => collection(db, "primalParties");
-
-/** Decide which slot index the host's char fills, given the host's vocation. */
-export function hostSlotIndex(hostVoc: Vocation): number {
-  if (hostVoc === "EK") return 0;
-  if (hostVoc === "ED") return 1;
-  return 2; // first ANY slot
-}
 
 export function canVocFillSlot(voc: Vocation, slot: SlotVocation): boolean {
   if (slot === "ANY") return true;
   return slot === voc;
 }
 
+/** First slot index in the given composition that accepts the host's vocation. */
+export function hostSlotIndexFor(
+  composition: SlotVocation[],
+  hostVoc: Vocation
+): number {
+  return composition.findIndex((v) => canVocFillSlot(hostVoc, v));
+}
+
 export async function createParty(input: CreatePartyInput) {
-  const slots: Slot[] = SLOT_TEMPLATE.map((vocation, index) => ({
+  const slots: Slot[] = input.slotComposition.map((vocation, index) => ({
     index,
     vocation,
     entry: null,
   }));
-  const hostIndex = hostSlotIndex(input.hostVocation);
+  const hostIndex = hostSlotIndexFor(input.slotComposition, input.hostVocation);
+  if (hostIndex < 0) {
+    throw new Error(
+      "Nenhuma vaga aceita a vocação do host. Ajuste a composição."
+    );
+  }
   slots[hostIndex] = {
     ...slots[hostIndex],
     entry: {
@@ -98,15 +118,62 @@ export async function createParty(input: CreatePartyInput) {
     hostUid: input.hostUid,
     hostCharacterId: input.hostCharacterId,
     server: input.server,
-    minLevel: input.minLevel,
-    schedule: input.schedule,
     notes: input.notes,
+    requirements: input.requirements,
     status: "forming" as PartyStatus,
     slots,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
     closedAt: null,
   });
+}
+
+/** Effective minimum level for the party (always >= quest minimum). */
+export function effectiveMinLevel(party: PrimalParty): number {
+  const v = party.requirements?.minLevel;
+  return v?.active ? Math.max(v.value, PRIMAL_PARTY_MIN_LEVEL) : PRIMAL_PARTY_MIN_LEVEL;
+}
+
+/** Check whether a char (with optional pool entry) can apply to a given slot in a party. */
+export function isCharEligibleForSlot(
+  char: Character,
+  poolEntry: PrimalPoolEntry | undefined,
+  party: PrimalParty,
+  slotIndex: number
+): { ok: boolean; reason?: string } {
+  const slot = party.slots[slotIndex];
+  if (!slot) return { ok: false, reason: "Vaga inválida" };
+  if (slot.entry) return { ok: false, reason: "Vaga já ocupada" };
+  if (char.questHistory?.primal === true)
+    return { ok: false, reason: "Char já fez Primal" };
+  if (party.server && char.server !== party.server)
+    return { ok: false, reason: "Servidor diferente" };
+  if (!canVocFillSlot(char.vocation, slot.vocation))
+    return { ok: false, reason: `Vocação ${slot.vocation} requerida` };
+
+  const req = party.requirements ?? DEFAULT_REQUIREMENTS;
+  if (req.minLevel?.active && char.level < req.minLevel.value)
+    return { ok: false, reason: `Level mínimo ${req.minLevel.value}` };
+
+  if (req.minHazard?.active) {
+    if (!poolEntry) return { ok: false, reason: "Char precisa estar na pool (hazard)" };
+    if (poolEntry.hazard < req.minHazard.value)
+      return { ok: false, reason: `Hazard mínimo ${req.minHazard.value}` };
+  }
+
+  if (req.schedule?.active && req.schedule.value.length > 0) {
+    if (!poolEntry) return { ok: false, reason: "Char precisa estar na pool (turnos)" };
+    const overlap = poolEntry.availability.some((t) =>
+      req.schedule.value.includes(t)
+    );
+    if (!overlap) return { ok: false, reason: "Turnos incompatíveis" };
+  }
+
+  // Not already in this party
+  if (party.slots.some((s) => s.entry?.characterId === char.id))
+    return { ok: false, reason: "Char já está nessa PT" };
+
+  return { ok: true };
 }
 
 export function subscribeToFormingParties(
@@ -157,14 +224,26 @@ function mapParty(d: import("firebase/firestore").QueryDocumentSnapshot): Primal
     vocation: (s.vocation ?? "ANY") as SlotVocation,
     entry: s.entry ?? null,
   }));
+  const rawReq = (data.requirements ?? null) as Partial<PartyRequirements> | null;
+  // Back-compat: old docs had top-level minLevel and no requirements.
+  const legacyMinLevel = typeof data.minLevel === "number"
+    ? (data.minLevel as number)
+    : null;
+  const requirements: PartyRequirements = {
+    minLevel: rawReq?.minLevel ?? {
+      active: legacyMinLevel != null && legacyMinLevel > PRIMAL_PARTY_MIN_LEVEL,
+      value: legacyMinLevel ?? PRIMAL_PARTY_MIN_LEVEL,
+    },
+    minHazard: rawReq?.minHazard ?? { active: false, value: 0 },
+    schedule: rawReq?.schedule ?? { active: false, value: [] },
+  };
   return {
     id: d.id,
     hostUid: String(data.hostUid ?? ""),
     hostCharacterId: String(data.hostCharacterId ?? ""),
     server: String(data.server ?? ""),
-    minLevel: Number(data.minLevel ?? PRIMAL_PARTY_MIN_LEVEL),
-    schedule: String(data.schedule ?? ""),
     notes: String(data.notes ?? ""),
+    requirements,
     status: (data.status as PartyStatus) ?? "forming",
     slots,
     createdAt: (data.createdAt as Timestamp) ?? null,
