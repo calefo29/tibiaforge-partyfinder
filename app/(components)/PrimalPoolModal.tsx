@@ -491,10 +491,7 @@ function Step2Details({
             max={HAZARD_MAX}
             value={hazard}
             onChange={(e) => setHazard(parseInt(e.target.value, 10))}
-            className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
-            style={{
-              background: `linear-gradient(to right, var(--ok), var(--warn), var(--danger))`,
-            }}
+            className="hazard-slider"
           />
           <div className="flex justify-between text-[10px] text-[var(--text-dim)] mt-1 tabular-nums">
             <span>0</span>
