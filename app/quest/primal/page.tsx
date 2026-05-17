@@ -28,6 +28,8 @@ export default function PrimalHubPage() {
   const router = useRouter();
   const { user, loading } = useAuth();
 
+  type Tab = "pool" | "pts" | "sugestao" | "minhas";
+  const [tab, setTab] = useState<Tab>("pool");
   const [chars, setChars] = useState<Character[] | null>(null);
   const [pool, setPool] = useState<PrimalPoolEntry[] | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
@@ -107,145 +109,202 @@ export default function PrimalHubPage() {
   return (
     <AppShell>
       <div className="max-w-[1180px] mx-auto px-8 py-8">
-        {/* Quest header */}
-        <div className="bg-gradient-to-br from-[var(--accent)]/8 to-[var(--accent)]/0 border border-[var(--border)] rounded-xl p-6 mb-6 flex items-start justify-between gap-6 flex-wrap">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">
-              The Primal Order
-            </h1>
-            <p className="text-sm text-[var(--text-mute)] mt-1">
-              Hub da quest · pool de chars + formação de PT
-            </p>
-            <div className="flex gap-5 flex-wrap text-xs text-[var(--text-mute)] mt-4">
-              <span>
-                <strong className="text-[var(--text)]">Composição:</strong> 1 EK · 1+ ED · 3 flex
-              </span>
-              <span>
-                <strong className="text-[var(--text)]">Level mínimo:</strong> 600
-              </span>
-              <span>
-                <strong className="text-[var(--text)]">Tamanho:</strong> 5 players
-              </span>
+        {/* Quest header + tabs */}
+        <div className="bg-gradient-to-br from-[var(--accent)]/8 to-[var(--accent)]/0 border border-[var(--border)] rounded-xl p-6 mb-6">
+          <div className="flex items-start justify-between gap-6 flex-wrap mb-5">
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight">
+                The Primal Order
+              </h1>
+              <p className="text-sm text-[var(--text-mute)] mt-1">
+                Hub da quest · pool de chars + formação de PT
+              </p>
+              <div className="flex gap-5 flex-wrap text-xs text-[var(--text-mute)] mt-4">
+                <span>
+                  <strong className="text-[var(--text)]">Composição:</strong> 1 EK · 1+ ED · 3 flex
+                </span>
+                <span>
+                  <strong className="text-[var(--text)]">Level mínimo:</strong> 600
+                </span>
+                <span>
+                  <strong className="text-[var(--text)]">Tamanho:</strong> 5 players
+                </span>
+              </div>
             </div>
           </div>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={openCreate}
-              disabled={!chars}
-              className="bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-[#04122a] font-medium px-4 py-2 rounded-md transition text-sm disabled:opacity-60"
-            >
-              + Cadastrar char na pool
-            </button>
+
+          {/* Tab bar segmented */}
+          <div className="flex flex-wrap gap-1.5 bg-[var(--background)]/60 border border-[var(--border)] rounded-lg p-1">
+            <TabButton
+              active={tab === "pool"}
+              onClick={() => setTab("pool")}
+              icon="👥"
+              label="Cadastrar personagens na Pool"
+              badge={pool?.length}
+            />
+            <TabButton
+              active={tab === "pts"}
+              onClick={() => setTab("pts")}
+              icon="⚔️"
+              label="PTs criadas"
+            />
+            <TabButton
+              active={tab === "sugestao"}
+              onClick={() => setTab("sugestao")}
+              icon="✨"
+              label="Sugestão automática"
+            />
+            <TabButton
+              active={tab === "minhas"}
+              onClick={() => setTab("minhas")}
+              icon="🛡️"
+              label="Minhas PTs"
+            />
           </div>
         </div>
 
-        {/* Meus chars na pool — vem primeiro, full width */}
-        <section className="mb-8">
-          <div className="flex items-center justify-between mb-3">
-            <div>
-              <h2 className="text-base font-semibold">Meus chars na pool</h2>
-              <p className="text-xs text-[var(--text-mute)] mt-0.5">
-                Chars seus disponíveis pros líderes formarem PT de Primal.
-              </p>
-            </div>
-          </div>
-
-          {pool === null || chars === null ? (
-            <div className="text-center text-sm text-[var(--text-mute)] py-10">
-              Carregando pool…
-            </div>
-          ) : pool.length === 0 ? (
-            <div className="border border-dashed border-[var(--border-strong)] rounded-xl p-10 text-center">
-              <strong className="block text-[15px] mb-1">
-                Nenhum char na pool ainda
-              </strong>
-              <p className="text-sm text-[var(--text-mute)] mb-4">
-                Cadastra um char pra ele ficar disponível pros líderes formarem PT.
-              </p>
+        {/* Tab content */}
+        {tab === "pool" && (
+          <section>
+            <div className="flex items-start justify-between gap-4 mb-4 flex-wrap">
+              <div>
+                <h2 className="text-base font-semibold">Meus chars na pool</h2>
+                <p className="text-xs text-[var(--text-mute)] mt-0.5">
+                  Chars seus disponíveis pros líderes formarem PT de Primal.
+                </p>
+              </div>
               <button
                 type="button"
                 onClick={openCreate}
-                className="bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-[#04122a] font-medium px-4 py-2 rounded-md transition text-sm"
+                disabled={!chars}
+                className="bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-[#04122a] font-medium px-4 py-2 rounded-md transition text-sm disabled:opacity-60"
               >
-                + Cadastrar primeiro char
+                + Cadastrar char na pool
               </button>
             </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-              {pool.map((entry) => {
-                const ch = charsById.get(entry.characterId);
-                if (!ch) {
-                  return (
-                    <div
-                      key={entry.id}
-                      className="bg-[var(--background-elev)] border border-[var(--border)] rounded-lg p-4 text-sm text-[var(--text-mute)]"
-                    >
-                      Personagem removido — esta inscrição pode ser excluída.
-                      <button
-                        type="button"
-                        onClick={() => handleRemove(entry.id)}
-                        className="block mt-2 text-xs text-[var(--danger)] hover:underline"
-                      >
-                        Remover da pool
-                      </button>
-                    </div>
-                  );
-                }
-                return (
-                  <PoolCard
-                    key={entry.id}
-                    entry={entry}
-                    ch={ch}
-                    removing={removingId === entry.id}
-                    onEdit={() => openEdit(entry)}
-                    onRemove={() => handleRemove(entry.id)}
-                  />
-                );
-              })}
-            </div>
-          )}
-        </section>
 
-        {/* Two-column grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-[1.4fr_1fr] gap-5">
-          {/* Left col — PTs manuais (em breve) */}
+            {pool === null || chars === null ? (
+              <div className="text-center text-sm text-[var(--text-mute)] py-10">
+                Carregando pool…
+              </div>
+            ) : pool.length === 0 ? (
+              <div className="border border-dashed border-[var(--border-strong)] rounded-xl p-10 text-center">
+                <strong className="block text-[15px] mb-1">
+                  Nenhum char na pool ainda
+                </strong>
+                <p className="text-sm text-[var(--text-mute)] mb-4">
+                  Cadastra um char pra ele ficar disponível pros líderes formarem PT.
+                </p>
+                <button
+                  type="button"
+                  onClick={openCreate}
+                  className="bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-[#04122a] font-medium px-4 py-2 rounded-md transition text-sm"
+                >
+                  + Cadastrar primeiro char
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                  {pool.map((entry) => {
+                    const ch = charsById.get(entry.characterId);
+                    if (!ch) {
+                      return (
+                        <div
+                          key={entry.id}
+                          className="bg-[var(--background-elev)] border border-[var(--border)] rounded-lg p-4 text-sm text-[var(--text-mute)]"
+                        >
+                          Personagem removido — esta inscrição pode ser excluída.
+                          <button
+                            type="button"
+                            onClick={() => handleRemove(entry.id)}
+                            className="block mt-2 text-xs text-[var(--danger)] hover:underline"
+                          >
+                            Remover da pool
+                          </button>
+                        </div>
+                      );
+                    }
+                    return (
+                      <PoolCard
+                        key={entry.id}
+                        entry={entry}
+                        ch={ch}
+                        removing={removingId === entry.id}
+                        onEdit={() => openEdit(entry)}
+                        onRemove={() => handleRemove(entry.id)}
+                      />
+                    );
+                  })}
+                </div>
+
+                <div className="mt-6">
+                  <PoolStatsCard
+                    myPoolCount={myPoolCount}
+                    countsByVoc={poolByVocation}
+                  />
+                </div>
+              </>
+            )}
+          </section>
+        )}
+
+        {tab === "pts" && (
           <section>
-            <h2 className="text-base font-semibold mb-3">
-              PTs manuais abertas
-              <span className="ml-2 text-xs font-normal text-[var(--text-mute)]">
-                · nunca expiram
-              </span>
-            </h2>
+            <div className="mb-4">
+              <h2 className="text-base font-semibold">PTs criadas</h2>
+              <p className="text-xs text-[var(--text-mute)] mt-0.5">
+                PTs manuais abertas no momento · qualquer player pode se candidatar.
+              </p>
+            </div>
             <ComingSoonCard
               title="Criar e procurar PT — em breve"
               text="Em construção: hosts vão poder montar PTs manuais com slots de vocação, level mínimo e horário. Outros players candidatam seus chars."
               note="🚧 Implementação do passo 2 do épico Primal."
             />
           </section>
+        )}
 
-          {/* Right col — sugestão + stats */}
-          <aside className="space-y-4">
-            <div>
-              <h2 className="text-base font-semibold mb-3 flex items-center gap-2">
+        {tab === "sugestao" && (
+          <section>
+            <div className="mb-4">
+              <h2 className="text-base font-semibold flex items-center gap-2">
                 Sugestão automática
                 <span className="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-[#22d3ee]/15 text-[#22d3ee] border border-[#22d3ee]/30">
                   em breve
                 </span>
               </h2>
-              <ComingSoonCard
-                title="PTs montadas automaticamente"
-                text="Quando habilitado, o sistema vai propor PTs de 5 chars de 5 players diferentes, respeitando 1 EK + 1+ ED, level e turnos compatíveis."
-                tone="info"
-              />
+              <p className="text-xs text-[var(--text-mute)] mt-0.5">
+                PTs propostas automaticamente combinando chars compatíveis da pool.
+              </p>
             </div>
-
-            <PoolStatsCard
-              myPoolCount={myPoolCount}
-              countsByVoc={poolByVocation}
+            <ComingSoonCard
+              title="PTs montadas automaticamente"
+              text="Quando habilitado, o sistema vai propor PTs de 5 chars de 5 players diferentes, respeitando 1 EK + 1+ ED, level e turnos compatíveis. Os 5 têm 24h pra confirmar."
+              tone="info"
             />
-          </aside>
-        </div>
+          </section>
+        )}
+
+        {tab === "minhas" && (
+          <section>
+            <div className="mb-4">
+              <h2 className="text-base font-semibold">Minhas PTs</h2>
+              <p className="text-xs text-[var(--text-mute)] mt-0.5">
+                PTs que você fechou (host) ou em que está confirmado. Histórico + ativas.
+              </p>
+            </div>
+            <div className="border border-dashed border-[var(--border-strong)] rounded-xl p-10 text-center">
+              <div className="text-3xl mb-2">🛡️</div>
+              <strong className="block text-[15px] mb-1">
+                Nenhuma PT fechada ainda
+              </strong>
+              <p className="text-sm text-[var(--text-mute)]">
+                Quando você fechar uma PT (como host) ou aceitar entrar em uma, ela aparece aqui.
+              </p>
+            </div>
+          </section>
+        )}
       </div>
 
       <PrimalPoolModal
@@ -257,6 +316,46 @@ export default function PrimalHubPage() {
         onClose={closeModal}
       />
     </AppShell>
+  );
+}
+
+function TabButton({
+  active,
+  onClick,
+  icon,
+  label,
+  badge,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: string;
+  label: string;
+  badge?: number;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex-1 min-w-[140px] flex items-center justify-center gap-2 px-3 py-2.5 rounded-md text-sm font-medium transition border ${
+        active
+          ? "bg-[var(--accent)] text-[#04122a] border-[var(--accent)] shadow-[0_0_20px_rgba(96,165,250,0.25)]"
+          : "bg-transparent text-[var(--text-mute)] border-transparent hover:bg-[var(--background-elev-2)] hover:text-[var(--text)]"
+      }`}
+    >
+      <span className="text-base leading-none">{icon}</span>
+      <span className="truncate">{label}</span>
+      {typeof badge === "number" && badge > 0 && (
+        <span
+          className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full tabular-nums ${
+            active
+              ? "bg-[#04122a]/20 text-[#04122a]"
+              : "bg-[var(--accent)]/15 text-[var(--accent)]"
+          }`}
+        >
+          {badge}
+        </span>
+      )}
+    </button>
   );
 }
 
