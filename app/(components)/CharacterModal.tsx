@@ -4,25 +4,33 @@ import { useEffect, useState } from "react";
 import { FirebaseError } from "firebase/app";
 import {
   addCharacter,
+  updateCharacter,
   VOCATIONS,
   VOCATION_LABELS,
   Vocation,
   Server,
+  Character,
+  QuestHistory,
+  DEFAULT_QUEST_HISTORY,
 } from "@/lib/characters";
 import type { ServerInfo, ServersResponse } from "@/app/api/servers/route";
 
 type Props = {
   open: boolean;
   ownerId: string;
+  editing?: Character | null;
   onClose: () => void;
   onSuccess?: () => void;
 };
 
-export function CharacterModal({ open, ownerId, onClose, onSuccess }: Props) {
+export function CharacterModal({ open, ownerId, editing, onClose, onSuccess }: Props) {
+  const isEdit = !!editing;
+
   const [name, setName] = useState("");
   const [vocation, setVocation] = useState<Vocation | "">("");
   const [level, setLevel] = useState("");
   const [server, setServer] = useState<Server | "">("");
+  const [questHistory, setQuestHistory] = useState<QuestHistory>(DEFAULT_QUEST_HISTORY);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -30,15 +38,26 @@ export function CharacterModal({ open, ownerId, onClose, onSuccess }: Props) {
   const [loadingServers, setLoadingServers] = useState(false);
 
   useEffect(() => {
-    if (!open) {
+    if (!open) return;
+    if (editing) {
+      setName(editing.name);
+      setVocation(editing.vocation);
+      setLevel(String(editing.level));
+      setServer(editing.server);
+      setQuestHistory({
+        primal: editing.questHistory?.primal ?? false,
+        soulwar: editing.questHistory?.soulwar ?? false,
+      });
+    } else {
       setName("");
       setVocation("");
       setLevel("");
       setServer("");
-      setError(null);
-      setBusy(false);
+      setQuestHistory(DEFAULT_QUEST_HISTORY);
     }
-  }, [open]);
+    setError(null);
+    setBusy(false);
+  }, [open, editing]);
 
   useEffect(() => {
     if (!open) return;
@@ -99,12 +118,18 @@ export function CharacterModal({ open, ownerId, onClose, onSuccess }: Props) {
 
     setBusy(true);
     try {
-      await addCharacter(ownerId, {
+      const payload = {
         name: trimmedName,
         vocation,
         level: parsedLevel,
         server,
-      });
+        questHistory,
+      };
+      if (editing) {
+        await updateCharacter(editing.id, payload);
+      } else {
+        await addCharacter(ownerId, payload);
+      }
       onSuccess?.();
       onClose();
     } catch (err) {
@@ -126,11 +151,13 @@ export function CharacterModal({ open, ownerId, onClose, onSuccess }: Props) {
       onClick={onClose}
     >
       <div
-        className="w-full max-w-[480px] bg-[var(--background-elev)] border border-[var(--border)] rounded-lg shadow-2xl"
+        className="w-full max-w-[520px] max-h-[92vh] overflow-y-auto bg-[var(--background-elev)] border border-[var(--border)] rounded-lg shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border)]">
-          <h2 className="text-lg font-semibold">Cadastrar personagem</h2>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border)] sticky top-0 bg-[var(--background-elev)] z-10">
+          <h2 className="text-lg font-semibold">
+            {isEdit ? "Editar personagem" : "Cadastrar personagem"}
+          </h2>
           <button
             type="button"
             onClick={onClose}
@@ -219,6 +246,41 @@ export function CharacterModal({ open, ownerId, onClose, onSuccess }: Props) {
             )}
           </div>
 
+          <div className="pt-2 border-t border-[var(--border)]">
+            <div className="flex items-baseline justify-between mb-1.5">
+              <label className="block text-xs uppercase tracking-wider text-[var(--text-mute)]">
+                Histórico de quests
+              </label>
+              <span className="text-[10px] uppercase tracking-wider text-[var(--danger)]">
+                obrigatório
+              </span>
+            </div>
+            <p className="text-xs text-[var(--text-dim)] mb-3">
+              Esse char <strong className="text-[var(--text)]">já completou</strong>{" "}
+              alguma dessas quests? Só serve pra registrar o histórico — não entra na
+              pool automaticamente.
+            </p>
+
+            <div className="space-y-2">
+              <QuestToggle
+                icon="⚔️"
+                title="The Primal Order"
+                active={questHistory.primal}
+                onToggle={() =>
+                  setQuestHistory((q) => ({ ...q, primal: !q.primal }))
+                }
+              />
+              <QuestToggle
+                icon="💀"
+                title="Soulwar"
+                active={questHistory.soulwar}
+                onToggle={() =>
+                  setQuestHistory((q) => ({ ...q, soulwar: !q.soulwar }))
+                }
+              />
+            </div>
+          </div>
+
           {error && (
             <div className="text-sm text-[var(--danger)] bg-[var(--danger)]/10 border border-[var(--danger)]/30 rounded-md px-3 py-2">
               {error}
@@ -231,7 +293,11 @@ export function CharacterModal({ open, ownerId, onClose, onSuccess }: Props) {
               disabled={busy}
               className="flex-1 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-[#04122a] font-medium py-2.5 rounded-md transition disabled:opacity-60"
             >
-              {busy ? "Salvando…" : "Salvar personagem"}
+              {busy
+                ? "Salvando…"
+                : isEdit
+                  ? "Salvar alterações"
+                  : "Salvar personagem"}
             </button>
             <button
               type="button"
@@ -245,5 +311,85 @@ export function CharacterModal({ open, ownerId, onClose, onSuccess }: Props) {
         </form>
       </div>
     </div>
+  );
+}
+
+function QuestToggle({
+  icon,
+  title,
+  active,
+  onToggle,
+}: {
+  icon: string;
+  title: string;
+  active: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className={`w-full flex items-center gap-3 p-3 rounded-lg border-[1.5px] transition text-left ${
+        active
+          ? "border-[var(--ok)] bg-[var(--ok)]/10 shadow-[0_0_0_1px_rgba(74,222,128,0.15),0_0_20px_rgba(74,222,128,0.08)]"
+          : "border-[var(--border-strong)] bg-[var(--background)] hover:border-[var(--accent-dim)] hover:bg-[var(--background-elev-2)]"
+      }`}
+    >
+      <span
+        className={`w-10 h-10 rounded-md flex items-center justify-center text-xl flex-shrink-0 border transition ${
+          active
+            ? "bg-[var(--ok)]/15 border-[var(--ok)]/45 shadow-[0_0_14px_rgba(74,222,128,0.25)]"
+            : "bg-[var(--background-elev-2)] border-[var(--border-strong)]"
+        }`}
+      >
+        {icon}
+      </span>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 text-sm font-semibold">
+          <span className={active ? "text-[#bef5d0]" : "text-[var(--text)]"}>
+            {title}
+          </span>
+          <span
+            className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full border ${
+              active
+                ? "bg-[var(--ok)]/15 text-[var(--ok)] border-[var(--ok)]/40"
+                : "bg-[var(--background-elev-2)] text-[var(--text-dim)] border-[var(--border-strong)]"
+            }`}
+          >
+            {active ? "já fiz" : "não fiz"}
+          </span>
+        </div>
+        <div
+          className={`text-[11px] mt-0.5 ${
+            active ? "text-[#bef5d0]/70" : "text-[var(--text-mute)]"
+          }`}
+        >
+          {active ? (
+            <>
+              Char marcado como <strong className="text-[var(--ok)]">já feita</strong>.
+            </>
+          ) : (
+            <>
+              Ative se o char <strong>já completou</strong> a {title}.
+            </>
+          )}
+        </div>
+      </div>
+      <span
+        className={`relative w-[46px] h-[24px] rounded-full border-[1.5px] flex-shrink-0 transition ${
+          active
+            ? "bg-[var(--ok)]/25 border-[var(--ok)] shadow-[inset_0_0_8px_rgba(74,222,128,0.4),0_0_10px_rgba(74,222,128,0.25)]"
+            : "bg-[var(--background-elev-2)] border-[var(--border-strong)]"
+        }`}
+      >
+        <span
+          className={`absolute top-[1px] w-[18px] h-[18px] rounded-full transition-all duration-200 ${
+            active
+              ? "left-[24px] bg-[var(--ok)] shadow-[0_0_8px_rgba(74,222,128,0.7)]"
+              : "left-[1px] bg-[var(--text-dim)]"
+          }`}
+        />
+      </span>
+    </button>
   );
 }

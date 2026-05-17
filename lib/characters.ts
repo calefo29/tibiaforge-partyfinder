@@ -8,6 +8,7 @@ import {
   query,
   serverTimestamp,
   Timestamp,
+  updateDoc,
   where,
 } from "firebase/firestore";
 import { db } from "./firebase";
@@ -27,6 +28,16 @@ export const VOCATION_LABELS: Record<Vocation, string> = {
 // Mantemos o type como string pra acomodar novos mundos sem precisar mexer no código.
 export type Server = string;
 
+export type QuestHistory = {
+  primal: boolean;
+  soulwar: boolean;
+};
+
+export const DEFAULT_QUEST_HISTORY: QuestHistory = {
+  primal: false,
+  soulwar: false,
+};
+
 export type Character = {
   id: string;
   ownerId: string;
@@ -34,7 +45,9 @@ export type Character = {
   vocation: Vocation;
   level: number;
   server: Server;
+  questHistory: QuestHistory;
   createdAt: Timestamp | null;
+  updatedAt: Timestamp | null;
 };
 
 export type CharacterInput = {
@@ -42,6 +55,7 @@ export type CharacterInput = {
   vocation: Vocation;
   level: number;
   server: Server;
+  questHistory: QuestHistory;
 };
 
 const charactersCol = () => collection(db, "characters");
@@ -53,7 +67,20 @@ export async function addCharacter(ownerId: string, input: CharacterInput) {
     vocation: input.vocation,
     level: input.level,
     server: input.server,
+    questHistory: input.questHistory,
     createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export async function updateCharacter(id: string, input: CharacterInput) {
+  await updateDoc(doc(db, "characters", id), {
+    name: input.name.trim(),
+    vocation: input.vocation,
+    level: input.level,
+    server: input.server,
+    questHistory: input.questHistory,
+    updatedAt: serverTimestamp(),
   });
 }
 
@@ -83,7 +110,12 @@ export function subscribeToUserCharacters(
           vocation: data.vocation,
           level: data.level,
           server: data.server,
+          questHistory: {
+            primal: data.questHistory?.primal ?? false,
+            soulwar: data.questHistory?.soulwar ?? false,
+          },
           createdAt: data.createdAt ?? null,
+          updatedAt: data.updatedAt ?? null,
         };
       });
       cb(list);

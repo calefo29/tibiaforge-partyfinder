@@ -15,6 +15,22 @@ export default function PerfilPage() {
   const [chars, setChars] = useState<Character[] | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
+  const [editing, setEditing] = useState<Character | null>(null);
+
+  const openCreate = () => {
+    setEditing(null);
+    setModalOpen(true);
+  };
+
+  const openEdit = (c: Character) => {
+    setEditing(c);
+    setModalOpen(true);
+  };
+
+  const closeModal = () => {
+    setModalOpen(false);
+    setEditing(null);
+  };
 
   useEffect(() => {
     if (!loading && !user) router.replace("/login");
@@ -77,7 +93,7 @@ export default function PerfilPage() {
           <h2 className="text-lg font-semibold">Meus personagens</h2>
           <button
             type="button"
-            onClick={() => setModalOpen(true)}
+            onClick={openCreate}
             className="bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-[#04122a] font-medium px-4 py-2 rounded-md transition text-sm"
           >
             + Adicionar personagem
@@ -104,7 +120,7 @@ export default function PerfilPage() {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
             {chars.map((c) => (
-              <CharacterCard key={c.id} char={c} />
+              <CharacterCard key={c.id} char={c} onEdit={openEdit} />
             ))}
           </div>
         )}
@@ -122,7 +138,8 @@ export default function PerfilPage() {
       <CharacterModal
         open={modalOpen}
         ownerId={user.uid}
-        onClose={() => setModalOpen(false)}
+        editing={editing}
+        onClose={closeModal}
       />
     </>
   );
