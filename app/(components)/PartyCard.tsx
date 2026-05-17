@@ -722,35 +722,53 @@ function HostInvitePicker({
   onPick: (entry: PrimalPoolEntry) => void;
 }) {
   const slot = party.slots[slotIndex];
+  const [onlyEligible, setOnlyEligible] = useState(false);
+
+  // Pre-filtra por vocação do slot. Se for ANY, mostra todas as vocs.
+  const vocFiltered = useMemo(
+    () =>
+      allPool
+        .filter((e) => e.vocation && e.characterName)
+        .filter(
+          (e) => slot.vocation === "ANY" || e.vocation === slot.vocation
+        ),
+    [allPool, slot.vocation]
+  );
 
   const evaluated = useMemo(
     () =>
-      allPool
-        .filter((e) => e.vocation && e.characterName) // skip pre-denorm entries
-        .map((e) => {
-          const check = checkCandidateForSlot(
-            {
-              characterId: e.characterId,
-              ownerId: e.ownerId,
-              vocation: e.vocation as Character["vocation"],
-              level: e.level,
-              server: e.server,
-              questDonePrimal: false, // chars in pool have not done Primal
-              hazard: e.hazard,
-              availability: e.availability,
-              hasExperience: e.experience,
-              inPool: true,
-            },
-            party,
-            slotIndex
-          );
-          return { entry: e, ...check };
-        }),
-    [allPool, party, slotIndex]
+      vocFiltered.map((e) => {
+        const check = checkCandidateForSlot(
+          {
+            characterId: e.characterId,
+            ownerId: e.ownerId,
+            vocation: e.vocation as Character["vocation"],
+            level: e.level,
+            server: e.server,
+            questDonePrimal: false,
+            hazard: e.hazard,
+            availability: e.availability,
+            hasExperience: e.experience,
+            inPool: true,
+          },
+          party,
+          slotIndex
+        );
+        return { entry: e, ...check };
+      }),
+    [vocFiltered, party, slotIndex]
   );
 
-  const eligible = evaluated.filter((e) => e.ok);
-  const blocked = evaluated.filter((e) => !e.ok);
+  // Elegíveis primeiro, depois bloqueados.
+  const sorted = useMemo(() => {
+    const ok = evaluated.filter((x) => x.ok);
+    const blocked = evaluated.filter((x) => !x.ok);
+    return [...ok, ...blocked];
+  }, [evaluated]);
+
+  const visible = onlyEligible ? sorted.filter((x) => x.ok) : sorted;
+  const eligibleCount = evaluated.filter((x) => x.ok).length;
+  const blockedCount = evaluated.length - eligibleCount;
 
   return (
     <div
@@ -758,40 +776,98 @@ function HostInvitePicker({
       onClick={onCancel}
     >
       <div
-        className="w-full max-w-[520px] max-h-[90vh] overflow-y-auto bg-[var(--background-elev)] border border-[var(--border)] rounded-xl p-5 shadow-2xl"
+        className="w-full max-w-[560px] max-h-[90vh] overflow-y-auto bg-[var(--background-elev)] border border-[var(--border)] rounded-xl p-5 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <h3 className="text-sm font-semibold mb-1">
           Convidar char pra vaga {slotIndex + 1}
         </h3>
-        <p className="text-xs text-[var(--text-mute)] mb-1">
+        <p className="text-xs text-[var(--text-mute)] mb-3">
           Vocação:{" "}
           <strong className="text-[var(--text)]">
             {slot.vocation === "ANY" ? "Flex (qualquer)" : slot.vocation}
           </strong>{" "}
           · Servidor {party.server}
         </p>
-        <p className="text-xs text-[var(--text-dim)] mb-4">
-          Lista vem da pool da Primal — chars que se cadastraram pra fazer a
-          quest. Ao selecionar, o char vira pendente nesta PT (player precisa
-          aceitar).
-        </p>
 
-        {eligible.length === 0 ? (
+        <div className="flex items-center justify-between gap-3 mb-3 bg-[var(--background)] border border-[var(--border-strong)] rounded-lg px-3 py-2">
+          <span className="text-[11px] text-[var(--text-mute)]">
+            {eligibleCount} elegível(eis) ·{" "}
+            <span className="text-[var(--danger)]">
+              {blockedCount} não elegível(eis)
+            </span>
+          </span>
+          <button
+            type="button"
+            onClick={() => setOnlyEligible((v) => !v)}
+            aria-pressed={onlyEligible}
+            className="flex items-center gap-2 text-[11px] text-[var(--text)]"
+          >
+            <span>Apenas elegíveis</span>
+            <span
+              className={`relative w-[36px] h-[20px] rounded-full border-[1.5px] transition ${
+                onlyEligible
+                  ? "bg-[var(--accent)]/30 border-[var(--accent)] shadow-[inset_0_0_8px_rgba(96,165,250,0.4)]"
+                  : "bg-[var(--background-elev-2)] border-[var(--border-strong)]"
+              }`}
+            >
+              <span
+                className={`absolute top-[1px] w-[14px] h-[14px] rounded-full transition-all duration-200 ${
+                  onlyEligible
+                    ? "left-[19px] bg-[var(--accent)] shadow-[0_0_6px_rgba(96,165,250,0.7)]"
+                    : "left-[1px] bg-[var(--text-dim)]"
+                }`}
+              />
+            </span>
+          </button>
+        </div>
+
+        {visible.length === 0 ? (
           <div className="border border-dashed border-[var(--border-strong)] rounded-lg p-6 text-center text-sm text-[var(--text-mute)]">
-            Nenhum char elegível na pool pra essa vaga ainda.
+            {onlyEligible
+              ? "Nenhum char elegível pra essa vaga ainda."
+              : `Nenhum char ${slot.vocation === "ANY" ? "" : `${slot.vocation} `}na pool.`}
           </div>
         ) : (
           <div className="space-y-2 mb-4">
-            {eligible.map(({ entry }) => {
+            {visible.map(({ entry, ok, reason }) => {
               const vocColor =
                 VOC_COLORS[entry.vocation] ?? "text-[var(--accent)]";
+              if (ok) {
+                return (
+                  <button
+                    key={entry.id}
+                    type="button"
+                    onClick={() => onPick(entry)}
+                    className="w-full flex items-center gap-3 p-3 rounded-lg border border-[var(--border-strong)] bg-[var(--background)] hover:border-[var(--accent)] hover:bg-[var(--accent)]/6 text-left transition"
+                  >
+                    <span
+                      className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border border-[var(--border-strong)] bg-[var(--background-elev-2)] ${vocColor}`}
+                    >
+                      {entry.vocation || "?"}
+                    </span>
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-sm font-semibold truncate">
+                        {entry.characterName}
+                      </span>
+                      <span className="block text-[11px] text-[var(--text-mute)]">
+                        Level {entry.level} · Hazard {entry.hazard} ·{" "}
+                        {entry.availability
+                          .map((t) => TURNO_ICONS[t])
+                          .join(" ") || "sem turnos"}
+                      </span>
+                    </span>
+                    <span className="text-[10px] font-semibold text-[var(--ok)] bg-[var(--ok)]/10 border border-[var(--ok)]/40 px-2 py-0.5 rounded-full whitespace-nowrap">
+                      elegível
+                    </span>
+                  </button>
+                );
+              }
               return (
-                <button
+                <div
                   key={entry.id}
-                  type="button"
-                  onClick={() => onPick(entry)}
-                  className="w-full flex items-center gap-3 p-3 rounded-lg border border-[var(--border-strong)] bg-[var(--background)] hover:border-[var(--accent)] hover:bg-[var(--accent)]/6 text-left transition"
+                  className="w-full flex items-center gap-3 p-3 rounded-lg border border-[var(--border-strong)] bg-[var(--background)] opacity-60 cursor-not-allowed"
+                  title={reason}
                 >
                   <span
                     className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border border-[var(--border-strong)] bg-[var(--background-elev-2)] ${vocColor}`}
@@ -809,33 +885,13 @@ function HostInvitePicker({
                         .join(" ") || "sem turnos"}
                     </span>
                   </span>
-                </button>
-              );
-            })}
-          </div>
-        )}
-
-        {blocked.length > 0 && (
-          <details className="text-xs text-[var(--text-mute)] mb-4">
-            <summary className="cursor-pointer hover:text-[var(--text)]">
-              {blocked.length} char(s) não elegível(eis) — ver motivos
-            </summary>
-            <div className="mt-2 space-y-1 pl-2">
-              {blocked.map(({ entry, reason }) => (
-                <div
-                  key={entry.id}
-                  className="flex justify-between gap-2 py-1 border-b border-[var(--border)] last:border-0"
-                >
-                  <span className="truncate">
-                    {entry.vocation} {entry.characterName} ({entry.level})
-                  </span>
-                  <span className="text-[var(--danger)] text-[10px] whitespace-nowrap">
+                  <span className="text-[10px] font-semibold text-[var(--danger)] bg-[var(--danger)]/10 border border-[var(--danger)]/30 px-2 py-0.5 rounded-full whitespace-nowrap">
                     {reason}
                   </span>
                 </div>
-              ))}
-            </div>
-          </details>
+              );
+            })}
+          </div>
         )}
 
         <div className="flex justify-end gap-2">

@@ -257,6 +257,26 @@ export function subscribeToFormingParties(
   );
 }
 
+export function subscribeToClosedParties(
+  cb: (parties: PrimalParty[]) => void,
+  onError?: (err: Error) => void
+) {
+  const q = query(partiesCol(), where("status", "==", "closed"));
+  return onSnapshot(
+    q,
+    (snap) => {
+      const list = snap.docs.map(mapParty);
+      list.sort((a, b) => {
+        const at = a.closedAt?.toMillis?.() ?? a.createdAt?.toMillis?.() ?? 0;
+        const bt = b.closedAt?.toMillis?.() ?? b.createdAt?.toMillis?.() ?? 0;
+        return bt - at;
+      });
+      cb(list);
+    },
+    onError
+  );
+}
+
 export function subscribeToMyParties(
   uid: string,
   cb: (parties: PrimalParty[]) => void,

@@ -16,6 +16,7 @@ import {
 } from "@/lib/primal-pool";
 import {
   PrimalParty,
+  subscribeToClosedParties,
   subscribeToFormingParties,
   subscribeToMyParties,
 } from "@/lib/primal-parties";
@@ -43,6 +44,7 @@ export default function PrimalHubPage() {
   const [pool, setPool] = useState<PrimalPoolEntry[] | null>(null);
   const [allParties, setAllParties] = useState<PrimalParty[] | null>(null);
   const [hostedParties, setHostedParties] = useState<PrimalParty[] | null>(null);
+  const [closedParties, setClosedParties] = useState<PrimalParty[] | null>(null);
   const [allPool, setAllPool] = useState<PrimalPoolEntry[] | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [partyModalOpen, setPartyModalOpen] = useState(false);
@@ -97,6 +99,11 @@ export default function PrimalHubPage() {
     return () => unsub();
   }, [user]);
 
+  useEffect(() => {
+    const unsub = subscribeToClosedParties(setClosedParties);
+    return () => unsub();
+  }, []);
+
   const alreadyInPool = useMemo(
     () => new Set((pool ?? []).map((e) => e.characterId)),
     [pool]
@@ -116,27 +123,16 @@ export default function PrimalHubPage() {
     return m;
   }, [pool]);
 
-  const myActiveParties = useMemo(() => {
+  const myClosedParties = useMemo(() => {
     if (!myUid) return [];
-    const seen = new Set<string>();
-    const out: PrimalParty[] = [];
-    const push = (p: PrimalParty) => {
-      if (seen.has(p.id)) return;
-      seen.add(p.id);
-      out.push(p);
-    };
-    (hostedParties ?? []).forEach(push);
-    (allParties ?? []).forEach((p) => {
-      const involved = p.slots.some((s) => s.entry?.ownerId === myUid);
-      if (involved) push(p);
-    });
-    out.sort((a, b) => {
-      const at = a.createdAt?.toMillis?.() ?? 0;
-      const bt = b.createdAt?.toMillis?.() ?? 0;
-      return bt - at;
-    });
-    return out;
-  }, [hostedParties, allParties, myUid]);
+    return (closedParties ?? []).filter(
+      (p) =>
+        p.hostUid === myUid ||
+        p.slots.some(
+          (s) => s.entry?.ownerId === myUid && s.entry?.status === "confirmed"
+        )
+    );
+  }, [closedParties, myUid]);
 
   const myFormingParties = useMemo(
     () =>
@@ -166,7 +162,7 @@ export default function PrimalHubPage() {
   );
 
   const ptsCriadasCount = allParties?.length ?? 0;
-  const minhasPtsCount = myActiveParties.length;
+  const minhasPtsCount = myClosedParties.length;
 
   const poolByVocation = useMemo(() => {
     const counts: Record<string, number> = { EK: 0, ED: 0, RP: 0, MS: 0, EM: 0 };
@@ -458,26 +454,30 @@ export default function PrimalHubPage() {
         {tab === "minhas" && (
           <section>
             <div className="mb-4">
-              <h2 className="text-base font-semibold">Minhas PTs</h2>
+              <h2 className="text-base font-semibold">Minhas PTs fechadas</h2>
               <p className="text-xs text-[var(--text-mute)] mt-0.5">
-                PTs que você é host ou tem char inscrito. Quando uma fecha, todos os
-                seus chars locked saem das outras automaticamente.
+                Histórico das PTs que você fechou como host ou em que tinha um
+                char confirmado no momento do fechamento.
               </p>
             </div>
-            {myActiveParties.length === 0 ? (
+            {closedParties === null ? (
+              <div className="text-center text-sm text-[var(--text-mute)] py-10">
+                Carregando…
+              </div>
+            ) : myClosedParties.length === 0 ? (
               <div className="border border-dashed border-[var(--border-strong)] rounded-xl p-10 text-center">
                 <div className="text-3xl mb-2">🛡️</div>
                 <strong className="block text-[15px] mb-1">
-                  Nenhuma PT sua ainda
+                  Nenhuma PT fechada ainda
                 </strong>
                 <p className="text-sm text-[var(--text-mute)]">
-                  Quando você criar uma PT (host) ou candidatar um char numa PT,
+                  Quando uma PT sua for fechada (host clica em &quot;Fechar PT&quot;),
                   ela aparece aqui.
                 </p>
               </div>
             ) : (
               <div className="space-y-3.5">
-                {myActiveParties.map((p) => (
+                {myClosedParties.map((p) => (
                   <PartyCard
                     key={p.id}
                     party={p}
@@ -487,11 +487,6 @@ export default function PrimalHubPage() {
                     allPool={allPool ?? []}
                     charById={charsById}
                     hostChar={charsById.get(p.hostCharacterId) ?? null}
-                    onEdit={
-                      p.hostUid === myUid && p.status === "forming"
-                        ? () => setEditingParty(p)
-                        : undefined
-                    }
                   />
                 ))}
               </div>
