@@ -51,6 +51,7 @@ export function CreatePartyModal({ open, ownerId, characters, onClose }: Props) 
   const [reqScheduleTurnos, setReqScheduleTurnos] = useState<Set<Turno>>(
     new Set()
   );
+  const [reqExperiencedOn, setReqExperiencedOn] = useState(false);
 
   const [composition, setComposition] = useState<SlotVocation[]>([...SLOT_TEMPLATE]);
 
@@ -67,6 +68,7 @@ export function CreatePartyModal({ open, ownerId, characters, onClose }: Props) 
       setReqHazardValue(0);
       setReqScheduleOn(false);
       setReqScheduleTurnos(new Set());
+      setReqExperiencedOn(false);
       setComposition([...SLOT_TEMPLATE]);
       setError(null);
       setBusy(false);
@@ -143,6 +145,7 @@ export function CreatePartyModal({ open, ownerId, characters, onClose }: Props) 
       minLevel: { active: reqLevelOn, value: levelValue },
       minHazard: { active: reqHazardOn, value: reqHazardValue },
       schedule: { active: reqScheduleOn, value: [...reqScheduleTurnos] },
+      experienced: { active: reqExperiencedOn },
     };
 
     setBusy(true);
@@ -409,6 +412,19 @@ export function CreatePartyModal({ open, ownerId, characters, onClose }: Props) 
                   </div>
                 )}
               </RequirementBlock>
+
+              {/* Experience */}
+              <RequirementBlock
+                active={reqExperiencedOn}
+                onToggle={() => setReqExperiencedOn((v) => !v)}
+                icon="🎯"
+                title="Apenas com experiência"
+                hint={
+                  reqExperiencedOn
+                    ? "Apenas chars marcados como 'com experiência' na pool podem candidatar."
+                    : "Sem filtro de experiência."
+                }
+              />
 
               {/* Schedule */}
               <RequirementBlock

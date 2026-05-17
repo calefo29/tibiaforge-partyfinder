@@ -45,12 +45,14 @@ export type PartyRequirements = {
   minLevel: Requirement<number>;
   minHazard: Requirement<number>;
   schedule: Requirement<Turno[]>;
+  experienced: { active: boolean };
 };
 
 export const DEFAULT_REQUIREMENTS: PartyRequirements = {
   minLevel: { active: true, value: PRIMAL_PARTY_MIN_LEVEL },
   minHazard: { active: false, value: 0 },
   schedule: { active: false, value: [] },
+  experienced: { active: false },
 };
 
 export type PrimalParty = {
@@ -136,12 +138,14 @@ export function effectiveMinLevel(party: PrimalParty): number {
 
 export type CandidateCheck = {
   characterId: string;
+  ownerId: string;
   vocation: Vocation;
   level: number;
   server: string;
   questDonePrimal: boolean;
   hazard?: number;
   availability?: Turno[];
+  hasExperience?: boolean;
   inPool: boolean;
 };
 
@@ -178,8 +182,18 @@ export function checkCandidateForSlot(
     if (!overlap) return { ok: false, reason: "Turnos incompatíveis" };
   }
 
+  if (req.experienced?.active) {
+    if (!cand.inPool) return { ok: false, reason: "Char precisa estar na pool (experiência)" };
+    if (cand.hasExperience !== true)
+      return { ok: false, reason: "Precisa ter experiência na quest" };
+  }
+
   if (party.slots.some((s) => s.entry?.characterId === cand.characterId))
     return { ok: false, reason: "Char já está nessa PT" };
+
+  // 1 char por player: se outro char desse mesmo dono já está na PT, bloqueia.
+  if (party.slots.some((s) => s.entry?.ownerId === cand.ownerId))
+    return { ok: false, reason: "Você já tem um char nessa PT" };
 
   return { ok: true };
 }
@@ -191,39 +205,22 @@ export function isCharEligibleForSlot(
   party: PrimalParty,
   slotIndex: number
 ): { ok: boolean; reason?: string } {
-  const slot = party.slots[slotIndex];
-  if (!slot) return { ok: false, reason: "Vaga inválida" };
-  if (slot.entry) return { ok: false, reason: "Vaga já ocupada" };
-  if (char.questHistory?.primal === true)
-    return { ok: false, reason: "Char já fez Primal" };
-  if (party.server && char.server !== party.server)
-    return { ok: false, reason: "Servidor diferente" };
-  if (!canVocFillSlot(char.vocation, slot.vocation))
-    return { ok: false, reason: `Vocação ${slot.vocation} requerida` };
-
-  const req = party.requirements ?? DEFAULT_REQUIREMENTS;
-  if (req.minLevel?.active && char.level < req.minLevel.value)
-    return { ok: false, reason: `Level mínimo ${req.minLevel.value}` };
-
-  if (req.minHazard?.active) {
-    if (!poolEntry) return { ok: false, reason: "Char precisa estar na pool (hazard)" };
-    if (poolEntry.hazard < req.minHazard.value)
-      return { ok: false, reason: `Hazard mínimo ${req.minHazard.value}` };
-  }
-
-  if (req.schedule?.active && req.schedule.value.length > 0) {
-    if (!poolEntry) return { ok: false, reason: "Char precisa estar na pool (turnos)" };
-    const overlap = poolEntry.availability.some((t) =>
-      req.schedule.value.includes(t)
-    );
-    if (!overlap) return { ok: false, reason: "Turnos incompatíveis" };
-  }
-
-  // Not already in this party
-  if (party.slots.some((s) => s.entry?.characterId === char.id))
-    return { ok: false, reason: "Char já está nessa PT" };
-
-  return { ok: true };
+  return checkCandidateForSlot(
+    {
+      characterId: char.id,
+      ownerId: char.ownerId,
+      vocation: char.vocation,
+      level: char.level,
+      server: char.server,
+      questDonePrimal: char.questHistory?.primal === true,
+      hazard: poolEntry?.hazard,
+      availability: poolEntry?.availability,
+      hasExperience: poolEntry?.experience,
+      inPool: !!poolEntry,
+    },
+    party,
+    slotIndex
+  );
 }
 
 export function subscribeToFormingParties(
@@ -286,6 +283,7 @@ function mapParty(d: import("firebase/firestore").QueryDocumentSnapshot): Primal
     },
     minHazard: rawReq?.minHazard ?? { active: false, value: 0 },
     schedule: rawReq?.schedule ?? { active: false, value: [] },
+    experienced: rawReq?.experienced ?? { active: false },
   };
   return {
     id: d.id,

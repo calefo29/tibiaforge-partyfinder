@@ -731,12 +731,14 @@ function HostInvitePicker({
           const check = checkCandidateForSlot(
             {
               characterId: e.characterId,
+              ownerId: e.ownerId,
               vocation: e.vocation as Character["vocation"],
               level: e.level,
               server: e.server,
               questDonePrimal: false, // chars in pool have not done Primal
               hazard: e.hazard,
               availability: e.availability,
+              hasExperience: e.experience,
               inPool: true,
             },
             party,
@@ -864,6 +866,9 @@ function RequirementChips({ party }: { party: PrimalParty }) {
       .map((t) => `${TURNO_ICONS[t]} ${TURNO_LABELS[t]}`)
       .join(" · ");
     chips.push({ icon: "🕒", label: turnos });
+  }
+  if (r.experienced?.active) {
+    chips.push({ icon: "🎯", label: "Com experiência" });
   }
   if (chips.length === 0) {
     return (

@@ -45,6 +45,7 @@ export function EditPartyModal({ open, party, onClose }: Props) {
   const [reqHazardValue, setReqHazardValue] = useState(0);
   const [reqScheduleOn, setReqScheduleOn] = useState(false);
   const [reqScheduleTurnos, setReqScheduleTurnos] = useState<Set<Turno>>(new Set());
+  const [reqExperiencedOn, setReqExperiencedOn] = useState(false);
   const [composition, setComposition] = useState<SlotVocation[]>([
     "EK", "ED", "ANY", "ANY", "ANY",
   ]);
@@ -60,6 +61,7 @@ export function EditPartyModal({ open, party, onClose }: Props) {
     setReqHazardValue(party.requirements.minHazard.value);
     setReqScheduleOn(party.requirements.schedule.active);
     setReqScheduleTurnos(new Set(party.requirements.schedule.value));
+    setReqExperiencedOn(party.requirements.experienced?.active ?? false);
     setComposition(party.slots.map((s) => s.vocation) as SlotVocation[]);
     setBusy(false);
     setError(null);
@@ -109,6 +111,7 @@ export function EditPartyModal({ open, party, onClose }: Props) {
       minLevel: { active: reqLevelOn, value: levelValue },
       minHazard: { active: reqHazardOn, value: reqHazardValue },
       schedule: { active: reqScheduleOn, value: [...reqScheduleTurnos] },
+      experienced: { active: reqExperiencedOn },
     };
     setBusy(true);
     try {
@@ -277,6 +280,18 @@ export function EditPartyModal({ open, party, onClose }: Props) {
                   </div>
                 )}
               </RequirementBlock>
+
+              <RequirementBlock
+                active={reqExperiencedOn}
+                onToggle={() => setReqExperiencedOn((v) => !v)}
+                icon="🎯"
+                title="Apenas com experiência"
+                hint={
+                  reqExperiencedOn
+                    ? "Apenas chars marcados como 'com experiência' na pool."
+                    : "Sem filtro de experiência."
+                }
+              />
 
               <RequirementBlock
                 active={reqScheduleOn}
