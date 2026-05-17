@@ -5,8 +5,10 @@ import { Character } from "@/lib/characters";
 import {
   applyToSlot,
   cancelParty,
+  checkCandidateForSlot,
   closePartyAndLock,
   effectiveMinLevel,
+  inviteToSlot,
   isCharEligibleForSlot,
   PrimalParty,
   setSlotStatus,
@@ -32,8 +34,10 @@ type Props = {
   myUid: string;
   myChars: Character[];
   myPoolByCharId: Map<string, PrimalPoolEntry>;
+  allPool?: PrimalPoolEntry[];
   charById: Map<string, Character>;
   hostChar: Character | null;
+  onEdit?: () => void;
 };
 
 export function PartyCard({
@@ -41,12 +45,15 @@ export function PartyCard({
   myUid,
   myChars,
   myPoolByCharId,
+  allPool,
   charById,
   hostChar,
+  onEdit,
 }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pickerSlot, setPickerSlot] = useState<number | null>(null);
+  const [hostPickerSlot, setHostPickerSlot] = useState<number | null>(null);
 
   const isHost = party.hostUid === myUid;
   const filled = party.slots.filter((s) => s.entry).length;
@@ -129,6 +136,34 @@ export function PartyCard({
               !!slot.entry && slot.entry.characterId === party.hostCharacterId
             }
             partyIsClosed={isClosed}
+            onClick={
+              isHost && !isClosed && !isCancelled && !slot.entry
+                ? () => setHostPickerSlot(slot.index)
+                : undefined
+            }
+            entryName={
+              slot.entry
+                ? charById.get(slot.entry.characterId)?.name ??
+                  poolEntryByCharId(allPool, slot.entry.characterId)
+                    ?.characterName ??
+                  null
+                : null
+            }
+            entryVoc={
+              slot.entry
+                ? charById.get(slot.entry.characterId)?.vocation ??
+                  (poolEntryByCharId(allPool, slot.entry.characterId)
+                    ?.vocation as string) ??
+                  null
+                : null
+            }
+            entryLevel={
+              slot.entry
+                ? charById.get(slot.entry.characterId)?.level ??
+                  poolEntryByCharId(allPool, slot.entry.characterId)?.level ??
+                  null
+                : null
+            }
           />
         ))}
       </div>
@@ -156,6 +191,7 @@ export function PartyCard({
                 handleAction(() => closePartyAndLock(party.id, party))
               }
               onCancel={() => handleAction(() => cancelParty(party.id))}
+              onEdit={onEdit}
             />
           )}
 
@@ -190,6 +226,27 @@ export function PartyCard({
             setPickerSlot(null);
             await handleAction(() =>
               applyToSlot(party.id, party, pickerSlot, charId, myUid)
+            );
+          }}
+        />
+      )}
+
+      {hostPickerSlot !== null && (
+        <HostInvitePicker
+          party={party}
+          slotIndex={hostPickerSlot}
+          allPool={allPool ?? []}
+          onCancel={() => setHostPickerSlot(null)}
+          onPick={async (entry) => {
+            setHostPickerSlot(null);
+            await handleAction(() =>
+              inviteToSlot(
+                party.id,
+                party,
+                hostPickerSlot,
+                entry.characterId,
+                entry.ownerId
+              )
             );
           }}
         />
@@ -238,27 +295,47 @@ function StatusBadge({
 
 function SlotCell({
   slot,
-  character,
   isMine,
   isHostSlot,
   partyIsClosed,
+  onClick,
+  entryName,
+  entryVoc,
+  entryLevel,
 }: {
   slot: Slot;
-  character: Character | null;
+  character?: Character | null;
   isMine: boolean;
   isHostSlot: boolean;
   partyIsClosed: boolean;
+  onClick?: () => void;
+  entryName: string | null;
+  entryVoc: string | null;
+  entryLevel: number | null;
 }) {
   const vocLabel = slot.vocation === "ANY" ? "Flex" : slot.vocation;
 
   if (!slot.entry) {
+    const clickable = !!onClick;
     return (
-      <div className="p-2 rounded-md border border-dashed border-[var(--accent-dim)] bg-[var(--accent)]/4 min-h-[68px] flex flex-col items-center justify-center text-center">
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={!clickable}
+        className={`p-2 rounded-md border border-dashed min-h-[68px] flex flex-col items-center justify-center text-center transition w-full ${
+          clickable
+            ? "border-[var(--accent)] bg-[var(--accent)]/4 hover:bg-[var(--accent)]/12 hover:border-[var(--accent)] cursor-pointer"
+            : "border-[var(--accent-dim)] bg-[var(--accent)]/4 cursor-default"
+        }`}
+        title={clickable ? "Clique pra convidar um char" : undefined}
+      >
         <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--warn)]">
           {vocLabel}
         </div>
-        <div className="text-[10px] text-[var(--text-mute)] mt-1">Vaga aberta</div>
-      </div>
+        <div className="text-[10px] text-[var(--text-mute)] mt-1">
+          {clickable ? "+ convidar" : "Vaga aberta"}
+        </div>
+      </button>
     );
   }
 
@@ -268,8 +345,8 @@ function SlotCell({
     : partyIsClosed
       ? "border-[var(--ok)] bg-[var(--ok)]/8"
       : "border-[var(--ok)]/40 bg-[var(--ok)]/5";
-  const vocColor = character
-    ? VOC_COLORS[character.vocation] ?? "text-[var(--accent)]"
+  const vocColor = entryVoc
+    ? VOC_COLORS[entryVoc] ?? "text-[var(--accent)]"
     : "text-[var(--text-mute)]";
 
   return (
@@ -279,13 +356,13 @@ function SlotCell({
       <div
         className={`text-[10px] font-bold uppercase tracking-wider ${vocColor}`}
       >
-        {character?.vocation ?? vocLabel}
+        {entryVoc ?? vocLabel}
       </div>
       <div className="text-[11px] text-[var(--text)] font-medium mt-0.5 truncate w-full">
-        {character?.name ?? "removido"}
+        {entryName ?? "removido"}
       </div>
       <div className="text-[9px] text-[var(--text-dim)] tabular-nums">
-        {character?.level ?? "—"}
+        {entryLevel ?? "—"}
       </div>
       {pending && (
         <div className="text-[9px] font-bold text-[var(--warn)] uppercase mt-0.5">
@@ -302,6 +379,13 @@ function SlotCell({
   );
 }
 
+function poolEntryByCharId(
+  pool: PrimalPoolEntry[] | undefined,
+  charId: string
+): PrimalPoolEntry | undefined {
+  return pool?.find((e) => e.characterId === charId);
+}
+
 function HostActions({
   party,
   busy,
@@ -310,6 +394,7 @@ function HostActions({
   onKickSlot,
   onClose,
   onCancel,
+  onEdit,
 }: {
   party: PrimalParty;
   busy: boolean;
@@ -318,6 +403,7 @@ function HostActions({
   onKickSlot: (i: number) => void;
   onClose: () => void;
   onCancel: () => void;
+  onEdit?: () => void;
 }) {
   const pendings = party.slots.filter(
     (s) => s.entry?.status === "pending"
@@ -362,14 +448,27 @@ function HostActions({
       )}
 
       <div className="flex items-center justify-between gap-2 flex-wrap">
-        <button
-          type="button"
-          disabled={busy}
-          onClick={onCancel}
-          className="text-xs border border-[var(--border-strong)] hover:border-[var(--danger)]/40 hover:text-[var(--danger)] px-3 py-1.5 rounded transition disabled:opacity-50"
-        >
-          Cancelar PT
-        </button>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onCancel}
+            className="text-xs border border-[var(--border-strong)] hover:border-[var(--danger)]/40 hover:text-[var(--danger)] px-3 py-1.5 rounded transition disabled:opacity-50"
+          >
+            Cancelar PT
+          </button>
+          {onEdit && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={onEdit}
+              className="text-xs border border-[var(--border-strong)] hover:border-[var(--accent-dim)] hover:bg-[var(--background-elev-2)] px-3 py-1.5 rounded transition disabled:opacity-50 flex items-center gap-1.5"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+              Editar PT
+            </button>
+          )}
+        </div>
         <button
           type="button"
           disabled={busy || !allConfirmed}
@@ -585,6 +684,148 @@ function SlotPicker({
                 <div key={c.id} className="flex justify-between gap-2 py-1 border-b border-[var(--border)] last:border-0">
                   <span className="truncate">
                     {c.vocation} {c.name} ({c.level})
+                  </span>
+                  <span className="text-[var(--danger)] text-[10px] whitespace-nowrap">
+                    {reason}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </details>
+        )}
+
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="text-xs border border-[var(--border-strong)] hover:border-[var(--accent-dim)] px-3 py-1.5 rounded transition"
+          >
+            Cancelar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function HostInvitePicker({
+  party,
+  slotIndex,
+  allPool,
+  onCancel,
+  onPick,
+}: {
+  party: PrimalParty;
+  slotIndex: number;
+  allPool: PrimalPoolEntry[];
+  onCancel: () => void;
+  onPick: (entry: PrimalPoolEntry) => void;
+}) {
+  const slot = party.slots[slotIndex];
+
+  const evaluated = useMemo(
+    () =>
+      allPool
+        .filter((e) => e.vocation && e.characterName) // skip pre-denorm entries
+        .map((e) => {
+          const check = checkCandidateForSlot(
+            {
+              characterId: e.characterId,
+              vocation: e.vocation as Character["vocation"],
+              level: e.level,
+              server: e.server,
+              questDonePrimal: false, // chars in pool have not done Primal
+              hazard: e.hazard,
+              availability: e.availability,
+              inPool: true,
+            },
+            party,
+            slotIndex
+          );
+          return { entry: e, ...check };
+        }),
+    [allPool, party, slotIndex]
+  );
+
+  const eligible = evaluated.filter((e) => e.ok);
+  const blocked = evaluated.filter((e) => !e.ok);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65 backdrop-blur-sm"
+      onClick={onCancel}
+    >
+      <div
+        className="w-full max-w-[520px] max-h-[90vh] overflow-y-auto bg-[var(--background-elev)] border border-[var(--border)] rounded-xl p-5 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 className="text-sm font-semibold mb-1">
+          Convidar char pra vaga {slotIndex + 1}
+        </h3>
+        <p className="text-xs text-[var(--text-mute)] mb-1">
+          Vocação:{" "}
+          <strong className="text-[var(--text)]">
+            {slot.vocation === "ANY" ? "Flex (qualquer)" : slot.vocation}
+          </strong>{" "}
+          · Servidor {party.server}
+        </p>
+        <p className="text-xs text-[var(--text-dim)] mb-4">
+          Lista vem da pool da Primal — chars que se cadastraram pra fazer a
+          quest. Ao selecionar, o char vira pendente nesta PT (player precisa
+          aceitar).
+        </p>
+
+        {eligible.length === 0 ? (
+          <div className="border border-dashed border-[var(--border-strong)] rounded-lg p-6 text-center text-sm text-[var(--text-mute)]">
+            Nenhum char elegível na pool pra essa vaga ainda.
+          </div>
+        ) : (
+          <div className="space-y-2 mb-4">
+            {eligible.map(({ entry }) => {
+              const vocColor =
+                VOC_COLORS[entry.vocation] ?? "text-[var(--accent)]";
+              return (
+                <button
+                  key={entry.id}
+                  type="button"
+                  onClick={() => onPick(entry)}
+                  className="w-full flex items-center gap-3 p-3 rounded-lg border border-[var(--border-strong)] bg-[var(--background)] hover:border-[var(--accent)] hover:bg-[var(--accent)]/6 text-left transition"
+                >
+                  <span
+                    className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border border-[var(--border-strong)] bg-[var(--background-elev-2)] ${vocColor}`}
+                  >
+                    {entry.vocation || "?"}
+                  </span>
+                  <span className="flex-1 min-w-0">
+                    <span className="block text-sm font-semibold truncate">
+                      {entry.characterName}
+                    </span>
+                    <span className="block text-[11px] text-[var(--text-mute)]">
+                      Level {entry.level} · Hazard {entry.hazard} ·{" "}
+                      {entry.availability
+                        .map((t) => TURNO_ICONS[t])
+                        .join(" ") || "sem turnos"}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {blocked.length > 0 && (
+          <details className="text-xs text-[var(--text-mute)] mb-4">
+            <summary className="cursor-pointer hover:text-[var(--text)]">
+              {blocked.length} char(s) não elegível(eis) — ver motivos
+            </summary>
+            <div className="mt-2 space-y-1 pl-2">
+              {blocked.map(({ entry, reason }) => (
+                <div
+                  key={entry.id}
+                  className="flex justify-between gap-2 py-1 border-b border-[var(--border)] last:border-0"
+                >
+                  <span className="truncate">
+                    {entry.vocation} {entry.characterName} ({entry.level})
                   </span>
                   <span className="text-[var(--danger)] text-[10px] whitespace-nowrap">
                     {reason}

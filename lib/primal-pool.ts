@@ -11,6 +11,7 @@ import {
   where,
 } from "firebase/firestore";
 import { db } from "./firebase";
+import { Vocation } from "./characters";
 
 export const PRIMAL_MIN_LEVEL = 600;
 export const HAZARD_MIN = 0;
@@ -40,6 +41,13 @@ export const TURNO_ICONS: Record<Turno, string> = {
   madrugada: "🦉",
 };
 
+export type CharacterSnapshot = {
+  characterName: string;
+  vocation: Vocation;
+  level: number;
+  server: string;
+};
+
 export type PrimalPoolEntry = {
   id: string;
   characterId: string;
@@ -50,6 +58,11 @@ export type PrimalPoolEntry = {
   status: "active" | "inactive";
   registeredAt: Timestamp | null;
   updatedAt: Timestamp | null;
+  // Denormalized for cross-user invite picker (avoids cross-user char reads).
+  characterName: string;
+  vocation: Vocation | "";
+  level: number;
+  server: string;
 };
 
 export type PrimalPoolInput = {
@@ -61,7 +74,11 @@ export type PrimalPoolInput = {
 
 const poolCol = () => collection(db, "primalPool");
 
-export async function addToPrimalPool(ownerId: string, input: PrimalPoolInput) {
+export async function addToPrimalPool(
+  ownerId: string,
+  input: PrimalPoolInput,
+  snap: CharacterSnapshot
+) {
   return addDoc(poolCol(), {
     ownerId,
     characterId: input.characterId,
@@ -71,20 +88,64 @@ export async function addToPrimalPool(ownerId: string, input: PrimalPoolInput) {
     status: "active",
     registeredAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
+    characterName: snap.characterName,
+    vocation: snap.vocation,
+    level: snap.level,
+    server: snap.server,
   });
 }
 
-export async function updatePrimalPoolEntry(id: string, input: Omit<PrimalPoolInput, "characterId">) {
-  await updateDoc(doc(db, "primalPool", id), {
+export async function updatePrimalPoolEntry(
+  id: string,
+  input: Omit<PrimalPoolInput, "characterId">,
+  snap?: CharacterSnapshot
+) {
+  const payload: Record<string, unknown> = {
     experience: input.experience,
     hazard: input.hazard,
     availability: input.availability,
     updatedAt: serverTimestamp(),
-  });
+  };
+  if (snap) {
+    payload.characterName = snap.characterName;
+    payload.vocation = snap.vocation;
+    payload.level = snap.level;
+    payload.server = snap.server;
+  }
+  await updateDoc(doc(db, "primalPool", id), payload);
 }
 
 export async function removeFromPrimalPool(id: string) {
   await deleteDoc(doc(db, "primalPool", id));
+}
+
+function mapPoolEntry(
+  d: import("firebase/firestore").QueryDocumentSnapshot
+): PrimalPoolEntry {
+  const data = d.data();
+  return {
+    id: d.id,
+    ownerId: data.ownerId,
+    characterId: data.characterId,
+    experience: data.experience ?? false,
+    hazard: data.hazard ?? 0,
+    availability: (data.availability ?? []) as Turno[],
+    status: data.status ?? "active",
+    registeredAt: data.registeredAt ?? null,
+    updatedAt: data.updatedAt ?? null,
+    characterName: data.characterName ?? "",
+    vocation: data.vocation ?? "",
+    level: data.level ?? 0,
+    server: data.server ?? "",
+  };
+}
+
+function sortPoolByRecent(list: PrimalPoolEntry[]) {
+  list.sort((a, b) => {
+    const at = a.registeredAt?.toMillis?.() ?? 0;
+    const bt = b.registeredAt?.toMillis?.() ?? 0;
+    return bt - at;
+  });
 }
 
 export function subscribeToUserPrimalPool(
@@ -96,25 +157,24 @@ export function subscribeToUserPrimalPool(
   return onSnapshot(
     q,
     (snap) => {
-      const list: PrimalPoolEntry[] = snap.docs.map((d) => {
-        const data = d.data();
-        return {
-          id: d.id,
-          ownerId: data.ownerId,
-          characterId: data.characterId,
-          experience: data.experience ?? false,
-          hazard: data.hazard ?? 0,
-          availability: (data.availability ?? []) as Turno[],
-          status: data.status ?? "active",
-          registeredAt: data.registeredAt ?? null,
-          updatedAt: data.updatedAt ?? null,
-        };
-      });
-      list.sort((a, b) => {
-        const at = a.registeredAt?.toMillis?.() ?? 0;
-        const bt = b.registeredAt?.toMillis?.() ?? 0;
-        return bt - at;
-      });
+      const list = snap.docs.map(mapPoolEntry);
+      sortPoolByRecent(list);
+      cb(list);
+    },
+    onError
+  );
+}
+
+export function subscribeToActivePrimalPool(
+  cb: (entries: PrimalPoolEntry[]) => void,
+  onError?: (err: Error) => void
+) {
+  const q = query(poolCol(), where("status", "==", "active"));
+  return onSnapshot(
+    q,
+    (snap) => {
+      const list = snap.docs.map(mapPoolEntry);
+      sortPoolByRecent(list);
       cb(list);
     },
     onError

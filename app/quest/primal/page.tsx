@@ -8,6 +8,7 @@ import {
   hazardTier,
   PrimalPoolEntry,
   removeFromPrimalPool,
+  subscribeToActivePrimalPool,
   subscribeToUserPrimalPool,
   Turno,
   TURNO_ICONS,
@@ -21,6 +22,7 @@ import {
 import { AppShell } from "@/app/(components)/AppShell";
 import { PrimalPoolModal } from "@/app/(components)/PrimalPoolModal";
 import { CreatePartyModal } from "@/app/(components)/CreatePartyModal";
+import { EditPartyModal } from "@/app/(components)/EditPartyModal";
 import { PartyCard } from "@/app/(components)/PartyCard";
 
 const VOC_COLORS: Record<string, string> = {
@@ -41,8 +43,10 @@ export default function PrimalHubPage() {
   const [pool, setPool] = useState<PrimalPoolEntry[] | null>(null);
   const [allParties, setAllParties] = useState<PrimalParty[] | null>(null);
   const [hostedParties, setHostedParties] = useState<PrimalParty[] | null>(null);
+  const [allPool, setAllPool] = useState<PrimalPoolEntry[] | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [partyModalOpen, setPartyModalOpen] = useState(false);
+  const [editingParty, setEditingParty] = useState<PrimalParty | null>(null);
   const [editingEntry, setEditingEntry] = useState<PrimalPoolEntry | null>(null);
   const [removingId, setRemovingId] = useState<string | null>(null);
 
@@ -79,6 +83,11 @@ export default function PrimalHubPage() {
 
   useEffect(() => {
     const unsub = subscribeToFormingParties(setAllParties);
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    const unsub = subscribeToActivePrimalPool(setAllPool);
     return () => unsub();
   }, []);
 
@@ -128,6 +137,22 @@ export default function PrimalHubPage() {
     });
     return out;
   }, [hostedParties, allParties, myUid]);
+
+  const myFormingParties = useMemo(
+    () =>
+      (allParties ?? []).filter(
+        (p) => p.hostUid === myUid && p.status === "forming"
+      ),
+    [allParties, myUid]
+  );
+
+  const othersFormingParties = useMemo(
+    () =>
+      (allParties ?? []).filter(
+        (p) => p.hostUid !== myUid && p.status === "forming"
+      ),
+    [allParties, myUid]
+  );
 
   const ptsCriadasCount = allParties?.length ?? 0;
   const minhasPtsCount = myActiveParties.length;
@@ -306,8 +331,8 @@ export default function PrimalHubPage() {
         )}
 
         {tab === "pts" && (
-          <section>
-            <div className="flex items-start justify-between gap-4 mb-4 flex-wrap">
+          <section className="space-y-8">
+            <div className="flex items-start justify-between gap-4 flex-wrap">
               <div>
                 <h2 className="text-base font-semibold">PTs criadas</h2>
                 <p className="text-xs text-[var(--text-mute)] mt-0.5">
@@ -325,43 +350,76 @@ export default function PrimalHubPage() {
               </button>
             </div>
 
-            {allParties === null ? (
-              <div className="text-center text-sm text-[var(--text-mute)] py-10">
-                Carregando PTs…
-              </div>
-            ) : allParties.length === 0 ? (
-              <div className="border border-dashed border-[var(--border-strong)] rounded-xl p-10 text-center">
-                <div className="text-3xl mb-2">⚔️</div>
-                <strong className="block text-[15px] mb-1">
-                  Nenhuma PT aberta ainda
-                </strong>
-                <p className="text-sm text-[var(--text-mute)] mb-4">
-                  Seja o primeiro a montar uma — quanto mais cedo abrir, mais gente vê.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setPartyModalOpen(true)}
-                  disabled={!chars}
-                  className="bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-[#04122a] font-medium px-4 py-2 rounded-md transition text-sm disabled:opacity-60"
-                >
-                  + Criar primeira PT
-                </button>
-              </div>
-            ) : (
-              <div className="space-y-3.5">
-                {allParties.map((p) => (
-                  <PartyCard
-                    key={p.id}
-                    party={p}
-                    myUid={myUid}
-                    myChars={chars ?? []}
-                    myPoolByCharId={myPoolByCharId}
-                    charById={charsById}
-                    hostChar={charsById.get(p.hostCharacterId) ?? null}
-                  />
-                ))}
-              </div>
-            )}
+            {/* Minhas PTs criadas */}
+            <div>
+              <h3 className="text-xs uppercase tracking-wider text-[var(--accent)] mb-2 flex items-center gap-2">
+                <span>🛡️ Minhas PTs criadas</span>
+                <span className="text-[10px] font-bold text-[var(--accent)] bg-[var(--accent)]/15 px-1.5 py-0.5 rounded-full">
+                  {myFormingParties.length}
+                </span>
+              </h3>
+              {allParties === null ? (
+                <div className="text-center text-sm text-[var(--text-mute)] py-6">
+                  Carregando…
+                </div>
+              ) : myFormingParties.length === 0 ? (
+                <div className="border border-dashed border-[var(--border-strong)] rounded-lg p-6 text-center text-sm text-[var(--text-mute)]">
+                  Você ainda não criou nenhuma PT. Clica em{" "}
+                  <strong className="text-[var(--text)]">+ Criar nova PT</strong>{" "}
+                  pra começar.
+                </div>
+              ) : (
+                <div className="space-y-3.5">
+                  {myFormingParties.map((p) => (
+                    <PartyCard
+                      key={p.id}
+                      party={p}
+                      myUid={myUid}
+                      myChars={chars ?? []}
+                      myPoolByCharId={myPoolByCharId}
+                      allPool={allPool ?? []}
+                      charById={charsById}
+                      hostChar={charsById.get(p.hostCharacterId) ?? null}
+                      onEdit={() => setEditingParty(p)}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Outras PTs */}
+            <div>
+              <h3 className="text-xs uppercase tracking-wider text-[var(--text-mute)] mb-2 flex items-center gap-2">
+                <span>⚔️ Outras PTs abertas</span>
+                <span className="text-[10px] font-bold text-[var(--text-mute)] bg-[var(--background-elev-2)] px-1.5 py-0.5 rounded-full border border-[var(--border)]">
+                  {othersFormingParties.length}
+                </span>
+              </h3>
+              {allParties === null ? (
+                <div className="text-center text-sm text-[var(--text-mute)] py-6">
+                  Carregando…
+                </div>
+              ) : othersFormingParties.length === 0 ? (
+                <div className="border border-dashed border-[var(--border-strong)] rounded-lg p-6 text-center text-sm text-[var(--text-mute)]">
+                  Nenhuma PT de outros players aberta no momento.
+                </div>
+              ) : (
+                <div className="space-y-3.5">
+                  {othersFormingParties.map((p) => (
+                    <PartyCard
+                      key={p.id}
+                      party={p}
+                      myUid={myUid}
+                      myChars={chars ?? []}
+                      myPoolByCharId={myPoolByCharId}
+                      allPool={allPool ?? []}
+                      charById={charsById}
+                      hostChar={charsById.get(p.hostCharacterId) ?? null}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
           </section>
         )}
 
@@ -415,8 +473,14 @@ export default function PrimalHubPage() {
                     myUid={myUid}
                     myChars={chars ?? []}
                     myPoolByCharId={myPoolByCharId}
+                    allPool={allPool ?? []}
                     charById={charsById}
                     hostChar={charsById.get(p.hostCharacterId) ?? null}
+                    onEdit={
+                      p.hostUid === myUid && p.status === "forming"
+                        ? () => setEditingParty(p)
+                        : undefined
+                    }
                   />
                 ))}
               </div>
@@ -430,6 +494,12 @@ export default function PrimalHubPage() {
         ownerId={user.uid}
         characters={chars ?? []}
         onClose={() => setPartyModalOpen(false)}
+      />
+
+      <EditPartyModal
+        open={!!editingParty}
+        party={editingParty}
+        onClose={() => setEditingParty(null)}
       />
 
       <PrimalPoolModal

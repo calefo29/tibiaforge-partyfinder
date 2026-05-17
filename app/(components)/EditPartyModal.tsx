@@ -1,15 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { FirebaseError } from "firebase/app";
-import { Character, VOCATIONS, Vocation } from "@/lib/characters";
+import { VOCATIONS } from "@/lib/characters";
 import {
-  createParty,
-  hostSlotIndexFor,
   PartyRequirements,
+  PrimalParty,
   PRIMAL_PARTY_MIN_LEVEL,
-  SLOT_TEMPLATE,
   SlotVocation,
+  updateParty,
 } from "@/lib/primal-parties";
 import {
   HAZARD_MAX,
@@ -23,8 +22,7 @@ import {
 
 type Props = {
   open: boolean;
-  ownerId: string;
-  characters: Character[];
+  party: PrimalParty | null;
   onClose: () => void;
 };
 
@@ -39,39 +37,33 @@ const VOC_COLORS: Record<string, string> = {
 
 const SLOT_OPTIONS: SlotVocation[] = ["ANY", ...VOCATIONS];
 
-export function CreatePartyModal({ open, ownerId, characters, onClose }: Props) {
-  const [hostCharId, setHostCharId] = useState<string | null>(null);
+export function EditPartyModal({ open, party, onClose }: Props) {
   const [notes, setNotes] = useState("");
-
   const [reqLevelOn, setReqLevelOn] = useState(false);
   const [reqLevelValue, setReqLevelValue] = useState(String(PRIMAL_PARTY_MIN_LEVEL));
   const [reqHazardOn, setReqHazardOn] = useState(false);
   const [reqHazardValue, setReqHazardValue] = useState(0);
   const [reqScheduleOn, setReqScheduleOn] = useState(false);
-  const [reqScheduleTurnos, setReqScheduleTurnos] = useState<Set<Turno>>(
-    new Set()
-  );
-
-  const [composition, setComposition] = useState<SlotVocation[]>([...SLOT_TEMPLATE]);
-
+  const [reqScheduleTurnos, setReqScheduleTurnos] = useState<Set<Turno>>(new Set());
+  const [composition, setComposition] = useState<SlotVocation[]>([
+    "EK", "ED", "ANY", "ANY", "ANY",
+  ]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!open) {
-      setHostCharId(null);
-      setNotes("");
-      setReqLevelOn(false);
-      setReqLevelValue(String(PRIMAL_PARTY_MIN_LEVEL));
-      setReqHazardOn(false);
-      setReqHazardValue(0);
-      setReqScheduleOn(false);
-      setReqScheduleTurnos(new Set());
-      setComposition([...SLOT_TEMPLATE]);
-      setError(null);
-      setBusy(false);
-    }
-  }, [open]);
+    if (!open || !party) return;
+    setNotes(party.notes ?? "");
+    setReqLevelOn(party.requirements.minLevel.active);
+    setReqLevelValue(String(party.requirements.minLevel.value));
+    setReqHazardOn(party.requirements.minHazard.active);
+    setReqHazardValue(party.requirements.minHazard.value);
+    setReqScheduleOn(party.requirements.schedule.active);
+    setReqScheduleTurnos(new Set(party.requirements.schedule.value));
+    setComposition(party.slots.map((s) => s.vocation) as SlotVocation[]);
+    setBusy(false);
+    setError(null);
+  }, [open, party]);
 
   useEffect(() => {
     if (!open) return;
@@ -82,25 +74,7 @@ export function CreatePartyModal({ open, ownerId, characters, onClose }: Props) 
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
-  const eligibleChars = useMemo(
-    () =>
-      characters.filter(
-        (c) =>
-          c.level >= PRIMAL_PARTY_MIN_LEVEL && c.questHistory?.primal !== true
-      ),
-    [characters]
-  );
-  const selectedChar = eligibleChars.find((c) => c.id === hostCharId) ?? null;
-
-  const hostIdx = selectedChar
-    ? hostSlotIndexFor(composition, selectedChar.vocation)
-    : -1;
-  const hostFits = hostIdx >= 0;
-
-  const setSlot = (idx: number, voc: SlotVocation) => {
-    if (idx < 2) return; // First 2 slots are locked: EK and ED.
-    setComposition((prev) => prev.map((v, i) => (i === idx ? voc : v)));
-  };
+  if (!open || !party) return null;
 
   const toggleTurno = (t: Turno) => {
     setReqScheduleTurnos((prev) => {
@@ -111,20 +85,13 @@ export function CreatePartyModal({ open, ownerId, characters, onClose }: Props) 
     });
   };
 
-  if (!open) return null;
+  const setSlot = (idx: number, voc: SlotVocation) => {
+    if (idx < 2) return;
+    setComposition((prev) => prev.map((v, i) => (i === idx ? voc : v)));
+  };
 
-  const handleSubmit = async () => {
+  const handleSave = async () => {
     setError(null);
-    if (!selectedChar) {
-      setError("Escolha o char que você vai levar como host.");
-      return;
-    }
-    if (!hostFits) {
-      setError(
-        `Nenhuma vaga aceita ${selectedChar.vocation}. Ajuste a composição.`
-      );
-      return;
-    }
     let levelValue = PRIMAL_PARTY_MIN_LEVEL;
     if (reqLevelOn) {
       const parsed = parseInt(reqLevelValue, 10);
@@ -138,20 +105,14 @@ export function CreatePartyModal({ open, ownerId, characters, onClose }: Props) 
       setError("Marque pelo menos 1 turno ou desative o filtro de horário.");
       return;
     }
-
     const requirements: PartyRequirements = {
       minLevel: { active: reqLevelOn, value: levelValue },
       minHazard: { active: reqHazardOn, value: reqHazardValue },
       schedule: { active: reqScheduleOn, value: [...reqScheduleTurnos] },
     };
-
     setBusy(true);
     try {
-      await createParty({
-        hostUid: ownerId,
-        hostCharacterId: selectedChar.id,
-        hostVocation: selectedChar.vocation,
-        server: selectedChar.server,
+      await updateParty(party.id, party, {
         notes: notes.trim(),
         requirements,
         slotComposition: composition,
@@ -163,7 +124,7 @@ export function CreatePartyModal({ open, ownerId, characters, onClose }: Props) 
           ? err.message
           : err instanceof Error
             ? err.message
-            : "Erro ao criar PT.";
+            : "Erro ao atualizar PT.";
       setError(msg);
     } finally {
       setBusy(false);
@@ -176,11 +137,11 @@ export function CreatePartyModal({ open, ownerId, characters, onClose }: Props) 
       onClick={onClose}
     >
       <div
-        className="w-full max-w-[640px] max-h-[92vh] overflow-y-auto bg-[var(--background-elev)] border border-[var(--border)] rounded-xl shadow-2xl"
+        className="w-full max-w-[600px] max-h-[92vh] overflow-y-auto bg-[var(--background-elev)] border border-[var(--border)] rounded-xl shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="sticky top-0 bg-[var(--background-elev)] z-10 flex items-center justify-between px-5 py-4 border-b border-[var(--border)]">
-          <h2 className="text-base font-semibold">Criar PT da Primal Order</h2>
+          <h2 className="text-base font-semibold">Editar PT</h2>
           <button
             type="button"
             onClick={onClose}
@@ -192,73 +153,10 @@ export function CreatePartyModal({ open, ownerId, characters, onClose }: Props) 
         </div>
 
         <div className="p-5 space-y-5">
-          {/* Step 1 — Host char */}
-          <section>
-            <label className="block text-xs uppercase tracking-wider text-[var(--text-mute)] mb-2">
-              Qual char você vai levar? <span className="text-[var(--danger)]">*</span>
-            </label>
-            <p className="text-xs text-[var(--text-mute)] mb-3">
-              Servidor da PT vai ser o do char selecionado. Outros players só
-              candidatam chars do mesmo servidor.
-            </p>
-            {eligibleChars.length === 0 ? (
-              <div className="border border-dashed border-[var(--border-strong)] rounded-lg p-6 text-center text-sm text-[var(--text-mute)]">
-                Você não tem nenhum char elegível (level ≥{" "}
-                {PRIMAL_PARTY_MIN_LEVEL} e ainda não fez Primal).
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {eligibleChars.map((c) => {
-                  const selected = c.id === hostCharId;
-                  const vocColor =
-                    VOC_COLORS[c.vocation] ?? "text-[var(--accent)]";
-                  return (
-                    <button
-                      type="button"
-                      key={c.id}
-                      onClick={() => setHostCharId(c.id)}
-                      className={`w-full flex items-center gap-3 p-3 rounded-lg border-[1.5px] text-left transition ${
-                        selected
-                          ? "border-[var(--accent)] bg-[var(--accent)]/6 shadow-[inset_0_0_0_1px_var(--accent)]"
-                          : "border-[var(--border-strong)] bg-[var(--background)] hover:border-[var(--accent-dim)] hover:bg-[var(--background-elev-2)]"
-                      }`}
-                    >
-                      <span
-                        className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border border-[var(--border-strong)] bg-[var(--background-elev-2)] ${vocColor}`}
-                      >
-                        {c.vocation}
-                      </span>
-                      <span className="flex-1 min-w-0">
-                        <span className="block text-sm font-semibold truncate">
-                          {c.name}
-                        </span>
-                        <span className="block text-[11px] text-[var(--text-mute)]">
-                          Level {c.level} · {c.server}
-                        </span>
-                      </span>
-                      <span
-                        className={`w-[18px] h-[18px] rounded-full border-2 flex-shrink-0 relative ${
-                          selected
-                            ? "border-[var(--accent)]"
-                            : "border-[var(--border-strong)]"
-                        }`}
-                      >
-                        {selected && (
-                          <span className="absolute inset-[3px] rounded-full bg-[var(--accent)]" />
-                        )}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-            {selectedChar && (
-              <div className="mt-3 text-[11px] text-[var(--text-mute)]">
-                📍 Servidor da PT:{" "}
-                <strong className="text-[var(--text)]">{selectedChar.server}</strong>
-              </div>
-            )}
-          </section>
+          <p className="text-xs text-[var(--text-mute)]">
+            Servidor da PT: <strong className="text-[var(--text)]">{party.server}</strong> · não pode ser alterado.
+            Pra adicionar players, clique nas vagas abertas no card da PT.
+          </p>
 
           {/* Composição */}
           <section>
@@ -266,36 +164,25 @@ export function CreatePartyModal({ open, ownerId, characters, onClose }: Props) 
               Composição da PT
             </h3>
             <p className="text-xs text-[var(--text-mute)] mb-3">
-              Vagas 1 (<strong className="text-[#fbbf24]">EK</strong>) e 2 (
-              <strong className="text-[#4ade80]">ED</strong>) são fixas. Só as
-              vagas 3, 4 e 5 podem ser customizadas — use{" "}
-              <strong className="text-[var(--text)]">Flex</strong> pra aceitar
-              qualquer vocação.
+              Vagas 1 (EK) e 2 (ED) são fixas. Apenas vagas 3, 4 e 5 podem ser
+              alteradas.
             </p>
             <div className="grid grid-cols-5 gap-2">
               {composition.map((voc, i) => {
-                const isHostHere = selectedChar && i === hostIdx;
                 const locked = i < 2;
                 return (
                   <div
                     key={i}
                     className={`p-2.5 rounded-md border text-center ${
-                      isHostHere
-                        ? "border-[var(--accent)] bg-[var(--accent)]/8"
-                        : locked
-                          ? "border-[var(--border)] bg-[var(--background-elev-2)]"
-                          : "border-[var(--border-strong)] bg-[var(--background)]"
+                      locked
+                        ? "border-[var(--border)] bg-[var(--background-elev-2)]"
+                        : "border-[var(--border-strong)] bg-[var(--background)]"
                     }`}
                   >
                     <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-mute)] mb-1">
                       Vaga {i + 1}
                       {locked && (
-                        <span
-                          className="ml-1 text-[var(--text-dim)]"
-                          title="Vaga obrigatória — não pode ser alterada"
-                        >
-                          🔒
-                        </span>
+                        <span className="ml-1 text-[var(--text-dim)]">🔒</span>
                       )}
                     </div>
                     {locked ? (
@@ -307,9 +194,7 @@ export function CreatePartyModal({ open, ownerId, characters, onClose }: Props) 
                     ) : (
                       <select
                         value={voc}
-                        onChange={(e) =>
-                          setSlot(i, e.target.value as SlotVocation)
-                        }
+                        onChange={(e) => setSlot(i, e.target.value as SlotVocation)}
                         className={`w-full bg-[var(--background-elev-2)] border border-[var(--border)] rounded px-1.5 py-1 text-[12px] font-semibold outline-none focus:border-[var(--accent)] ${VOC_COLORS[voc] ?? ""}`}
                       >
                         {SLOT_OPTIONS.map((o) => (
@@ -319,34 +204,18 @@ export function CreatePartyModal({ open, ownerId, characters, onClose }: Props) 
                         ))}
                       </select>
                     )}
-                    <div className="text-[9px] mt-1 text-[var(--text-dim)] truncate">
-                      {isHostHere ? selectedChar?.name : "Aberta"}
-                    </div>
                   </div>
                 );
               })}
             </div>
-            {selectedChar && !hostFits && (
-              <p className="text-[11px] text-[var(--danger)] mt-2">
-                ⚠️ Nenhuma vaga aceita {selectedChar.vocation}. Mude pelo menos
-                uma vaga pra {selectedChar.vocation} ou Flex.
-              </p>
-            )}
           </section>
 
           {/* Requirements */}
           <section>
             <h3 className="text-xs uppercase tracking-wider text-[var(--text-mute)] mb-2">
-              Batentes (filtros pra entrar)
+              Batentes
             </h3>
-            <p className="text-xs text-[var(--text-mute)] mb-3">
-              Cada toggle é opcional. Quando ativo, vira{" "}
-              <strong className="text-[var(--text)]">filtro obrigatório</strong>{" "}
-              pra candidatos.
-            </p>
-
             <div className="space-y-2.5">
-              {/* Min level */}
               <RequirementBlock
                 active={reqLevelOn}
                 onToggle={() => setReqLevelOn((v) => !v)}
@@ -355,7 +224,7 @@ export function CreatePartyModal({ open, ownerId, characters, onClose }: Props) 
                 hint={
                   reqLevelOn
                     ? `Apenas chars com level ≥ ${reqLevelValue} podem candidatar.`
-                    : `Sem filtro de level (mínimo da quest: ${PRIMAL_PARTY_MIN_LEVEL}).`
+                    : `Sem filtro (mínimo da quest: ${PRIMAL_PARTY_MIN_LEVEL}).`
                 }
               >
                 {reqLevelOn && (
@@ -374,7 +243,6 @@ export function CreatePartyModal({ open, ownerId, characters, onClose }: Props) 
                 )}
               </RequirementBlock>
 
-              {/* Min hazard */}
               <RequirementBlock
                 active={reqHazardOn}
                 onToggle={() => setReqHazardOn((v) => !v)}
@@ -382,7 +250,7 @@ export function CreatePartyModal({ open, ownerId, characters, onClose }: Props) 
                 title="Hazard mínimo"
                 hint={
                   reqHazardOn
-                    ? `Apenas chars com Hazard ≥ ${reqHazardValue} podem candidatar (precisam estar na pool).`
+                    ? `Chars com Hazard ≥ ${reqHazardValue} (precisam estar na pool).`
                     : "Sem filtro de Hazard."
                 }
               >
@@ -410,7 +278,6 @@ export function CreatePartyModal({ open, ownerId, characters, onClose }: Props) 
                 )}
               </RequirementBlock>
 
-              {/* Schedule */}
               <RequirementBlock
                 active={reqScheduleOn}
                 onToggle={() => setReqScheduleOn((v) => !v)}
@@ -418,7 +285,7 @@ export function CreatePartyModal({ open, ownerId, characters, onClose }: Props) 
                 title="Horários aceitos"
                 hint={
                   reqScheduleOn
-                    ? "Char precisa ter pelo menos 1 dos turnos marcados na disponibilidade."
+                    ? "Char precisa ter pelo menos 1 turno em comum."
                     : "Sem filtro de horário."
                 }
               >
@@ -437,23 +304,17 @@ export function CreatePartyModal({ open, ownerId, characters, onClose }: Props) 
                               : "border-[var(--border-strong)] bg-[var(--background)] hover:border-[var(--accent-dim)]"
                           }`}
                         >
-                          <div className="text-lg leading-none">
-                            {TURNO_ICONS[t]}
-                          </div>
+                          <div className="text-lg leading-none">{TURNO_ICONS[t]}</div>
                           <div
                             className={`text-[10px] font-semibold mt-1 ${
-                              on
-                                ? "text-[var(--ok)]"
-                                : "text-[var(--text-mute)]"
+                              on ? "text-[var(--ok)]" : "text-[var(--text-mute)]"
                             }`}
                           >
                             {TURNO_LABELS[t]}
                           </div>
                           <div
                             className={`text-[9px] tabular-nums ${
-                              on
-                                ? "text-[var(--ok)]/70"
-                                : "text-[var(--text-dim)]"
+                              on ? "text-[var(--ok)]/70" : "text-[var(--text-dim)]"
                             }`}
                           >
                             {TURNO_RANGES[t]}
@@ -470,7 +331,7 @@ export function CreatePartyModal({ open, ownerId, characters, onClose }: Props) 
           {/* Notes */}
           <section>
             <label className="block text-xs uppercase tracking-wider text-[var(--text-mute)] mb-1.5">
-              Observações (opcional)
+              Observações
             </label>
             <textarea
               value={notes}
@@ -490,23 +351,23 @@ export function CreatePartyModal({ open, ownerId, characters, onClose }: Props) 
 
         <div className="sticky bottom-0 bg-[var(--background-elev)] flex items-center justify-between gap-2 px-5 py-3 border-t border-[var(--border)]">
           <span className="text-[11px] text-[var(--text-mute)]">
-            Você fica como host · pode aceitar/recusar candidaturas
+            Alterar batentes pode tornar candidatos atuais inelegíveis.
           </span>
           <div className="flex gap-2">
             <button
               type="button"
               onClick={onClose}
-              className="text-xs border border-[var(--border-strong)] hover:border-[var(--accent-dim)] hover:bg-[var(--background-elev-2)] px-3 py-1.5 rounded transition"
+              className="text-xs border border-[var(--border-strong)] hover:border-[var(--accent-dim)] px-3 py-1.5 rounded transition"
             >
               Cancelar
             </button>
             <button
               type="button"
-              onClick={handleSubmit}
-              disabled={busy || !selectedChar || !hostFits}
-              className="text-xs bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-[#04122a] font-medium px-3 py-1.5 rounded transition disabled:opacity-40 disabled:cursor-not-allowed"
+              onClick={handleSave}
+              disabled={busy}
+              className="text-xs bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-[#04122a] font-medium px-3 py-1.5 rounded transition disabled:opacity-40"
             >
-              {busy ? "Criando…" : "Criar PT"}
+              {busy ? "Salvando…" : "Salvar alterações"}
             </button>
           </div>
         </div>
@@ -561,7 +422,6 @@ function RequirementBlock({
           type="button"
           onClick={onToggle}
           aria-pressed={active}
-          aria-label={active ? "Desativar requisito" : "Ativar requisito"}
           className={`relative w-[42px] h-[22px] rounded-full border-[1.5px] flex-shrink-0 transition ${
             active
               ? "bg-[var(--accent)]/30 border-[var(--accent)] shadow-[inset_0_0_8px_rgba(96,165,250,0.4)]"

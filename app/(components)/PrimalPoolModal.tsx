@@ -119,19 +119,33 @@ export function PrimalPoolModal({
       setBusy(true);
       setError(null);
       try {
+        const snap = {
+          characterName: selectedChar.name,
+          vocation: selectedChar.vocation,
+          level: selectedChar.level,
+          server: selectedChar.server,
+        };
         if (editing) {
-          await updatePrimalPoolEntry(editing.id, {
-            experience: experience === true,
-            hazard,
-            availability: [...turnos],
-          });
+          await updatePrimalPoolEntry(
+            editing.id,
+            {
+              experience: experience === true,
+              hazard,
+              availability: [...turnos],
+            },
+            snap
+          );
         } else {
-          await addToPrimalPool(ownerId, {
-            characterId: selectedChar.id,
-            experience: experience === true,
-            hazard,
-            availability: [...turnos],
-          });
+          await addToPrimalPool(
+            ownerId,
+            {
+              characterId: selectedChar.id,
+              experience: experience === true,
+              hazard,
+              availability: [...turnos],
+            },
+            snap
+          );
         }
         setSavedCharName(selectedChar.name);
         setStep(3);

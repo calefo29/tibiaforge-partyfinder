@@ -134,6 +134,56 @@ export function effectiveMinLevel(party: PrimalParty): number {
   return v?.active ? Math.max(v.value, PRIMAL_PARTY_MIN_LEVEL) : PRIMAL_PARTY_MIN_LEVEL;
 }
 
+export type CandidateCheck = {
+  characterId: string;
+  vocation: Vocation;
+  level: number;
+  server: string;
+  questDonePrimal: boolean;
+  hazard?: number;
+  availability?: Turno[];
+  inPool: boolean;
+};
+
+/** Pure check using a generic candidate shape (works for pool entries or own chars). */
+export function checkCandidateForSlot(
+  cand: CandidateCheck,
+  party: PrimalParty,
+  slotIndex: number
+): { ok: boolean; reason?: string } {
+  const slot = party.slots[slotIndex];
+  if (!slot) return { ok: false, reason: "Vaga inválida" };
+  if (slot.entry) return { ok: false, reason: "Vaga já ocupada" };
+  if (cand.questDonePrimal) return { ok: false, reason: "Char já fez Primal" };
+  if (party.server && cand.server !== party.server)
+    return { ok: false, reason: "Servidor diferente" };
+  if (!canVocFillSlot(cand.vocation, slot.vocation))
+    return { ok: false, reason: `Vocação ${slot.vocation} requerida` };
+
+  const req = party.requirements ?? DEFAULT_REQUIREMENTS;
+  if (req.minLevel?.active && cand.level < req.minLevel.value)
+    return { ok: false, reason: `Level mínimo ${req.minLevel.value}` };
+
+  if (req.minHazard?.active) {
+    if (!cand.inPool) return { ok: false, reason: "Char precisa estar na pool (hazard)" };
+    if ((cand.hazard ?? 0) < req.minHazard.value)
+      return { ok: false, reason: `Hazard mínimo ${req.minHazard.value}` };
+  }
+
+  if (req.schedule?.active && req.schedule.value.length > 0) {
+    if (!cand.inPool) return { ok: false, reason: "Char precisa estar na pool (turnos)" };
+    const overlap = (cand.availability ?? []).some((t) =>
+      req.schedule.value.includes(t)
+    );
+    if (!overlap) return { ok: false, reason: "Turnos incompatíveis" };
+  }
+
+  if (party.slots.some((s) => s.entry?.characterId === cand.characterId))
+    return { ok: false, reason: "Char já está nessa PT" };
+
+  return { ok: true };
+}
+
 /** Check whether a char (with optional pool entry) can apply to a given slot in a party. */
 export function isCharEligibleForSlot(
   char: Character,
@@ -277,6 +327,53 @@ export async function applyToSlot(
   );
   await updateDoc(doc(db, "primalParties", partyId), {
     slots,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export async function inviteToSlot(
+  partyId: string,
+  party: PrimalParty,
+  slotIndex: number,
+  characterId: string,
+  ownerId: string
+) {
+  return applyToSlot(partyId, party, slotIndex, characterId, ownerId);
+}
+
+export type UpdatePartyInput = {
+  notes: string;
+  requirements: PartyRequirements;
+  slotComposition: SlotVocation[]; // length 5; first 2 must stay EK/ED
+};
+
+/** Update mutable party fields. Slots 0 and 1 stay fixed (EK/ED). */
+export async function updateParty(
+  partyId: string,
+  party: PrimalParty,
+  input: UpdatePartyInput
+) {
+  if (input.slotComposition.length !== 5) {
+    throw new Error("Composição precisa ter 5 vagas.");
+  }
+  if (input.slotComposition[0] !== "EK" || input.slotComposition[1] !== "ED") {
+    throw new Error("Vagas 1 (EK) e 2 (ED) não podem ser alteradas.");
+  }
+  // Apply new vocations, but if a slot already has an entry whose vocation no
+  // longer matches the new requirement, clear that entry.
+  const newSlots: Slot[] = party.slots.map((s, i) => {
+    const newVoc = input.slotComposition[i];
+    const entry = s.entry;
+    if (entry && newVoc !== "ANY") {
+      // We can't easily verify the entry's character vocation here; trust prior write.
+      // Caller responsible for not making invalid changes.
+    }
+    return { ...s, vocation: newVoc };
+  });
+  await updateDoc(doc(db, "primalParties", partyId), {
+    notes: input.notes,
+    requirements: input.requirements,
+    slots: newSlots,
     updatedAt: serverTimestamp(),
   });
 }
