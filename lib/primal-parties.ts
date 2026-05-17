@@ -106,6 +106,20 @@ export async function createParty(input: CreatePartyInput) {
       "Nenhuma vaga aceita a vocação do host. Ajuste a composição."
     );
   }
+
+  // Trava: 1 char só pode ser host de 1 PT em formação por vez.
+  const existing = await getDocs(
+    query(partiesCol(), where("hostCharacterId", "==", input.hostCharacterId))
+  );
+  const stillHosting = existing.docs.some(
+    (d) => (d.data().status ?? "forming") === "forming"
+  );
+  if (stillHosting) {
+    throw new Error(
+      "Esse char já é host de outra PT em formação. Cancele ou feche a outra antes."
+    );
+  }
+
   slots[hostIndex] = {
     ...slots[hostIndex],
     entry: {
@@ -446,19 +460,42 @@ export async function closePartyAndLock(partyId: string, party: PrimalParty) {
     updatedAt: serverTimestamp(),
   });
 
-  // 4. For each OTHER forming party, drop locked chars from open slots.
+  // 4. For each OTHER forming party:
+  //    - clear any slot whose char is now locked
+  //    - if the host's char is locked, transfer host to a random remaining slot,
+  //      or cancel the party if there's nobody left
   formingSnap.docs.forEach((d) => {
     if (d.id === partyId) return;
     const other = mapParty(d);
-    let changed = false;
+    const hostLocked = lockedCharIds.has(other.hostCharacterId);
+
+    let slotsChanged = false;
     const newSlots = other.slots.map((s) => {
       if (s.entry && lockedCharIds.has(s.entry.characterId)) {
-        changed = true;
+        slotsChanged = true;
         return { ...s, entry: null };
       }
       return s;
     });
-    if (changed) {
+
+    if (hostLocked) {
+      const remaining = newSlots.filter((s) => s.entry);
+      if (remaining.length === 0) {
+        batch.update(doc(db, "primalParties", d.id), {
+          status: "cancelled" as PartyStatus,
+          slots: newSlots,
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        const pick = remaining[Math.floor(Math.random() * remaining.length)];
+        batch.update(doc(db, "primalParties", d.id), {
+          hostUid: pick.entry!.ownerId,
+          hostCharacterId: pick.entry!.characterId,
+          slots: newSlots,
+          updatedAt: serverTimestamp(),
+        });
+      }
+    } else if (slotsChanged) {
       batch.update(doc(db, "primalParties", d.id), {
         slots: newSlots,
         updatedAt: serverTimestamp(),

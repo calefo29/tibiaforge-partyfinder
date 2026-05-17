@@ -25,6 +25,7 @@ type Props = {
   open: boolean;
   ownerId: string;
   characters: Character[];
+  hostingCharIds: Set<string>;
   onClose: () => void;
 };
 
@@ -39,7 +40,13 @@ const VOC_COLORS: Record<string, string> = {
 
 const SLOT_OPTIONS: SlotVocation[] = ["ANY", ...VOCATIONS];
 
-export function CreatePartyModal({ open, ownerId, characters, onClose }: Props) {
+export function CreatePartyModal({
+  open,
+  ownerId,
+  characters,
+  hostingCharIds,
+  onClose,
+}: Props) {
   const [hostCharId, setHostCharId] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
 
@@ -84,7 +91,9 @@ export function CreatePartyModal({ open, ownerId, characters, onClose }: Props) 
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
-  const eligibleChars = useMemo(
+  // Show all chars that pass the base bar (level + not-done). "Já é host" chars
+  // are listed but disabled so the player understands why.
+  const visibleChars = useMemo(
     () =>
       characters.filter(
         (c) =>
@@ -92,7 +101,10 @@ export function CreatePartyModal({ open, ownerId, characters, onClose }: Props) 
       ),
     [characters]
   );
-  const selectedChar = eligibleChars.find((c) => c.id === hostCharId) ?? null;
+  const selectedChar =
+    visibleChars.find(
+      (c) => c.id === hostCharId && !hostingCharIds.has(c.id)
+    ) ?? null;
 
   const hostIdx = selectedChar
     ? hostSlotIndexFor(composition, selectedChar.vocation)
@@ -204,26 +216,30 @@ export function CreatePartyModal({ open, ownerId, characters, onClose }: Props) 
               Servidor da PT vai ser o do char selecionado. Outros players só
               candidatam chars do mesmo servidor.
             </p>
-            {eligibleChars.length === 0 ? (
+            {visibleChars.length === 0 ? (
               <div className="border border-dashed border-[var(--border-strong)] rounded-lg p-6 text-center text-sm text-[var(--text-mute)]">
                 Você não tem nenhum char elegível (level ≥{" "}
                 {PRIMAL_PARTY_MIN_LEVEL} e ainda não fez Primal).
               </div>
             ) : (
               <div className="space-y-2">
-                {eligibleChars.map((c) => {
-                  const selected = c.id === hostCharId;
+                {visibleChars.map((c) => {
+                  const alreadyHosting = hostingCharIds.has(c.id);
+                  const selected = c.id === hostCharId && !alreadyHosting;
                   const vocColor =
                     VOC_COLORS[c.vocation] ?? "text-[var(--accent)]";
                   return (
                     <button
                       type="button"
                       key={c.id}
+                      disabled={alreadyHosting}
                       onClick={() => setHostCharId(c.id)}
                       className={`w-full flex items-center gap-3 p-3 rounded-lg border-[1.5px] text-left transition ${
-                        selected
-                          ? "border-[var(--accent)] bg-[var(--accent)]/6 shadow-[inset_0_0_0_1px_var(--accent)]"
-                          : "border-[var(--border-strong)] bg-[var(--background)] hover:border-[var(--accent-dim)] hover:bg-[var(--background-elev-2)]"
+                        alreadyHosting
+                          ? "opacity-50 cursor-not-allowed border-[var(--border-strong)] bg-[var(--background)]"
+                          : selected
+                            ? "border-[var(--accent)] bg-[var(--accent)]/6 shadow-[inset_0_0_0_1px_var(--accent)]"
+                            : "border-[var(--border-strong)] bg-[var(--background)] hover:border-[var(--accent-dim)] hover:bg-[var(--background-elev-2)]"
                       }`}
                     >
                       <span
@@ -239,20 +255,30 @@ export function CreatePartyModal({ open, ownerId, characters, onClose }: Props) 
                           Level {c.level} · {c.server}
                         </span>
                       </span>
-                      <span
-                        className={`w-[18px] h-[18px] rounded-full border-2 flex-shrink-0 relative ${
-                          selected
-                            ? "border-[var(--accent)]"
-                            : "border-[var(--border-strong)]"
-                        }`}
-                      >
-                        {selected && (
-                          <span className="absolute inset-[3px] rounded-full bg-[var(--accent)]" />
-                        )}
-                      </span>
+                      {alreadyHosting ? (
+                        <span className="text-[10px] font-semibold text-[var(--warn)] bg-[var(--warn)]/10 border border-[var(--warn)]/40 px-2 py-0.5 rounded-full">
+                          já é host
+                        </span>
+                      ) : (
+                        <span
+                          className={`w-[18px] h-[18px] rounded-full border-2 flex-shrink-0 relative ${
+                            selected
+                              ? "border-[var(--accent)]"
+                              : "border-[var(--border-strong)]"
+                          }`}
+                        >
+                          {selected && (
+                            <span className="absolute inset-[3px] rounded-full bg-[var(--accent)]" />
+                          )}
+                        </span>
+                      )}
                     </button>
                   );
                 })}
+                <p className="text-[11px] text-[var(--text-dim)] mt-1">
+                  💡 Um char pode ser host de apenas 1 PT por vez. Pra criar
+                  outra com o mesmo char, cancele ou feche a anterior.
+                </p>
               </div>
             )}
             {selectedChar && (

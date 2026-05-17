@@ -146,6 +146,17 @@ export default function PrimalHubPage() {
     [allParties, myUid]
   );
 
+  // Chars já hosting alguma PT em formação (global) — bloqueia criação de outra.
+  const hostingCharIds = useMemo(
+    () =>
+      new Set(
+        (allParties ?? [])
+          .filter((p) => p.status === "forming")
+          .map((p) => p.hostCharacterId)
+      ),
+    [allParties]
+  );
+
   const othersFormingParties = useMemo(
     () =>
       (allParties ?? []).filter(
@@ -493,6 +504,7 @@ export default function PrimalHubPage() {
         open={partyModalOpen}
         ownerId={user.uid}
         characters={chars ?? []}
+        hostingCharIds={hostingCharIds}
         onClose={() => setPartyModalOpen(false)}
       />
 
