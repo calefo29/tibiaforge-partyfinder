@@ -13,8 +13,15 @@ import {
   TURNO_ICONS,
   TURNO_LABELS,
 } from "@/lib/primal-pool";
+import {
+  PrimalParty,
+  subscribeToFormingParties,
+  subscribeToMyParties,
+} from "@/lib/primal-parties";
 import { AppShell } from "@/app/(components)/AppShell";
 import { PrimalPoolModal } from "@/app/(components)/PrimalPoolModal";
+import { CreatePartyModal } from "@/app/(components)/CreatePartyModal";
+import { PartyCard } from "@/app/(components)/PartyCard";
 
 const VOC_COLORS: Record<string, string> = {
   EK: "text-[#fbbf24]",
@@ -32,7 +39,10 @@ export default function PrimalHubPage() {
   const [tab, setTab] = useState<Tab>("pool");
   const [chars, setChars] = useState<Character[] | null>(null);
   const [pool, setPool] = useState<PrimalPoolEntry[] | null>(null);
+  const [allParties, setAllParties] = useState<PrimalParty[] | null>(null);
+  const [hostedParties, setHostedParties] = useState<PrimalParty[] | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
+  const [partyModalOpen, setPartyModalOpen] = useState(false);
   const [editingEntry, setEditingEntry] = useState<PrimalPoolEntry | null>(null);
   const [removingId, setRemovingId] = useState<string | null>(null);
 
@@ -67,6 +77,17 @@ export default function PrimalHubPage() {
     return () => unsub();
   }, [user]);
 
+  useEffect(() => {
+    const unsub = subscribeToFormingParties(setAllParties);
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    const unsub = subscribeToMyParties(user.uid, setHostedParties);
+    return () => unsub();
+  }, [user]);
+
   const alreadyInPool = useMemo(
     () => new Set((pool ?? []).map((e) => e.characterId)),
     [pool]
@@ -77,6 +98,33 @@ export default function PrimalHubPage() {
     (chars ?? []).forEach((c) => m.set(c.id, c));
     return m;
   }, [chars]);
+
+  const myUid = user?.uid ?? "";
+
+  const myActiveParties = useMemo(() => {
+    if (!myUid) return [];
+    const seen = new Set<string>();
+    const out: PrimalParty[] = [];
+    const push = (p: PrimalParty) => {
+      if (seen.has(p.id)) return;
+      seen.add(p.id);
+      out.push(p);
+    };
+    (hostedParties ?? []).forEach(push);
+    (allParties ?? []).forEach((p) => {
+      const involved = p.slots.some((s) => s.entry?.ownerId === myUid);
+      if (involved) push(p);
+    });
+    out.sort((a, b) => {
+      const at = a.createdAt?.toMillis?.() ?? 0;
+      const bt = b.createdAt?.toMillis?.() ?? 0;
+      return bt - at;
+    });
+    return out;
+  }, [hostedParties, allParties, myUid]);
+
+  const ptsCriadasCount = allParties?.length ?? 0;
+  const minhasPtsCount = myActiveParties.length;
 
   const poolByVocation = useMemo(() => {
     const counts: Record<string, number> = { EK: 0, ED: 0, RP: 0, MS: 0, EM: 0 };
@@ -147,6 +195,7 @@ export default function PrimalHubPage() {
               onClick={() => setTab("pts")}
               icon="⚔️"
               label="PTs criadas"
+              badge={ptsCriadasCount}
             />
             <TabButton
               active={tab === "sugestao"}
@@ -159,6 +208,7 @@ export default function PrimalHubPage() {
               onClick={() => setTab("minhas")}
               icon="🛡️"
               label="Minhas PTs"
+              badge={minhasPtsCount}
             />
           </div>
         </div>
@@ -251,17 +301,60 @@ export default function PrimalHubPage() {
 
         {tab === "pts" && (
           <section>
-            <div className="mb-4">
-              <h2 className="text-base font-semibold">PTs criadas</h2>
-              <p className="text-xs text-[var(--text-mute)] mt-0.5">
-                PTs manuais abertas no momento · qualquer player pode se candidatar.
-              </p>
+            <div className="flex items-start justify-between gap-4 mb-4 flex-wrap">
+              <div>
+                <h2 className="text-base font-semibold">PTs criadas</h2>
+                <p className="text-xs text-[var(--text-mute)] mt-0.5">
+                  PTs abertas pra Primal · seu char pode estar em várias até uma
+                  fechar.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPartyModalOpen(true)}
+                disabled={!chars}
+                className="bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-[#04122a] font-medium px-4 py-2 rounded-md transition text-sm disabled:opacity-60"
+              >
+                + Criar nova PT
+              </button>
             </div>
-            <ComingSoonCard
-              title="Criar e procurar PT — em breve"
-              text="Em construção: hosts vão poder montar PTs manuais com slots de vocação, level mínimo e horário. Outros players candidatam seus chars."
-              note="🚧 Implementação do passo 2 do épico Primal."
-            />
+
+            {allParties === null ? (
+              <div className="text-center text-sm text-[var(--text-mute)] py-10">
+                Carregando PTs…
+              </div>
+            ) : allParties.length === 0 ? (
+              <div className="border border-dashed border-[var(--border-strong)] rounded-xl p-10 text-center">
+                <div className="text-3xl mb-2">⚔️</div>
+                <strong className="block text-[15px] mb-1">
+                  Nenhuma PT aberta ainda
+                </strong>
+                <p className="text-sm text-[var(--text-mute)] mb-4">
+                  Seja o primeiro a montar uma — quanto mais cedo abrir, mais gente vê.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setPartyModalOpen(true)}
+                  disabled={!chars}
+                  className="bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-[#04122a] font-medium px-4 py-2 rounded-md transition text-sm disabled:opacity-60"
+                >
+                  + Criar primeira PT
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-3.5">
+                {allParties.map((p) => (
+                  <PartyCard
+                    key={p.id}
+                    party={p}
+                    myUid={myUid}
+                    myChars={chars ?? []}
+                    charById={charsById}
+                    hostChar={charsById.get(p.hostCharacterId) ?? null}
+                  />
+                ))}
+              </div>
+            )}
           </section>
         )}
 
@@ -291,21 +384,45 @@ export default function PrimalHubPage() {
             <div className="mb-4">
               <h2 className="text-base font-semibold">Minhas PTs</h2>
               <p className="text-xs text-[var(--text-mute)] mt-0.5">
-                PTs que você fechou (host) ou em que está confirmado. Histórico + ativas.
+                PTs que você é host ou tem char inscrito. Quando uma fecha, todos os
+                seus chars locked saem das outras automaticamente.
               </p>
             </div>
-            <div className="border border-dashed border-[var(--border-strong)] rounded-xl p-10 text-center">
-              <div className="text-3xl mb-2">🛡️</div>
-              <strong className="block text-[15px] mb-1">
-                Nenhuma PT fechada ainda
-              </strong>
-              <p className="text-sm text-[var(--text-mute)]">
-                Quando você fechar uma PT (como host) ou aceitar entrar em uma, ela aparece aqui.
-              </p>
-            </div>
+            {myActiveParties.length === 0 ? (
+              <div className="border border-dashed border-[var(--border-strong)] rounded-xl p-10 text-center">
+                <div className="text-3xl mb-2">🛡️</div>
+                <strong className="block text-[15px] mb-1">
+                  Nenhuma PT sua ainda
+                </strong>
+                <p className="text-sm text-[var(--text-mute)]">
+                  Quando você criar uma PT (host) ou candidatar um char numa PT,
+                  ela aparece aqui.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3.5">
+                {myActiveParties.map((p) => (
+                  <PartyCard
+                    key={p.id}
+                    party={p}
+                    myUid={myUid}
+                    myChars={chars ?? []}
+                    charById={charsById}
+                    hostChar={charsById.get(p.hostCharacterId) ?? null}
+                  />
+                ))}
+              </div>
+            )}
           </section>
         )}
       </div>
+
+      <CreatePartyModal
+        open={partyModalOpen}
+        ownerId={user.uid}
+        characters={chars ?? []}
+        onClose={() => setPartyModalOpen(false)}
+      />
 
       <PrimalPoolModal
         open={modalOpen}
