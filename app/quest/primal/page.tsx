@@ -20,11 +20,19 @@ import {
   subscribeToFormingParties,
   subscribeToMyParties,
 } from "@/lib/primal-parties";
+import {
+  currentCycleDate,
+  hasCurrentCycleRun,
+  PrimalSuggestion,
+  subscribeToMySuggestions,
+} from "@/lib/primal-suggestions";
 import { AppShell } from "@/app/(components)/AppShell";
 import { PrimalPoolModal } from "@/app/(components)/PrimalPoolModal";
 import { CreatePartyModal } from "@/app/(components)/CreatePartyModal";
 import { EditPartyModal } from "@/app/(components)/EditPartyModal";
 import { PartyCard } from "@/app/(components)/PartyCard";
+import { SuggestionCard } from "@/app/(components)/SuggestionCard";
+import { DevSuggestionTools } from "@/app/(components)/DevSuggestionTools";
 
 const VOC_COLORS: Record<string, string> = {
   EK: "text-[#fbbf24]",
@@ -46,6 +54,9 @@ export default function PrimalHubPage() {
   const [hostedParties, setHostedParties] = useState<PrimalParty[] | null>(null);
   const [closedParties, setClosedParties] = useState<PrimalParty[] | null>(null);
   const [allPool, setAllPool] = useState<PrimalPoolEntry[] | null>(null);
+  const [mySuggestions, setMySuggestions] = useState<PrimalSuggestion[] | null>(null);
+  const [lockedCharIds, setLockedCharIds] = useState<Set<string>>(new Set());
+  const [cycleRan, setCycleRan] = useState<boolean | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [partyModalOpen, setPartyModalOpen] = useState(false);
   const [editingParty, setEditingParty] = useState<PrimalParty | null>(null);
@@ -103,6 +114,41 @@ export default function PrimalHubPage() {
     const unsub = subscribeToClosedParties(setClosedParties);
     return () => unsub();
   }, []);
+
+  // Subscribe nas sugestões que envolvem meus chars
+  const myCharIds = useMemo(
+    () => (chars ?? []).map((c) => c.id),
+    [chars]
+  );
+  useEffect(() => {
+    if (myCharIds.length === 0) {
+      setMySuggestions([]);
+      return;
+    }
+    const unsub = subscribeToMySuggestions(myCharIds, setMySuggestions);
+    return () => unsub();
+  }, [myCharIds]);
+
+  // Checa se o ciclo atual já rodou (ou re-checa quando as sugestões mudam)
+  useEffect(() => {
+    let cancelled = false;
+    hasCurrentCycleRun(currentCycleDate())
+      .then((ran) => { if (!cancelled) setCycleRan(ran); })
+      .catch(() => { if (!cancelled) setCycleRan(null); });
+    return () => { cancelled = true; };
+  }, [mySuggestions]);
+
+  // Mantém set de chars locked atualizado a partir das closedParties
+  useEffect(() => {
+    if (!closedParties) return;
+    const set = new Set<string>();
+    closedParties.forEach((p) => {
+      p.slots.forEach((s) => {
+        if (s.entry?.characterId) set.add(s.entry.characterId);
+      });
+    });
+    setLockedCharIds(set);
+  }, [closedParties]);
 
   const alreadyInPool = useMemo(
     () => new Set((pool ?? []).map((e) => e.characterId)),
@@ -163,6 +209,13 @@ export default function PrimalHubPage() {
 
   const ptsCriadasCount = allParties?.length ?? 0;
   const minhasPtsCount = myClosedParties.length;
+
+  const myCharIdSet = useMemo(() => new Set(myCharIds), [myCharIds]);
+  const sugestaoCount = useMemo(
+    () =>
+      (mySuggestions ?? []).filter((s) => s.status === "pending").length,
+    [mySuggestions]
+  );
 
   const poolByVocation = useMemo(() => {
     const counts: Record<string, number> = { EK: 0, ED: 0, RP: 0, MS: 0, EM: 0 };
@@ -240,6 +293,7 @@ export default function PrimalHubPage() {
               onClick={() => setTab("sugestao")}
               icon="✨"
               label="Sugestão automática"
+              badge={sugestaoCount}
             />
             <TabButton
               active={tab === "minhas"}
@@ -431,24 +485,13 @@ export default function PrimalHubPage() {
         )}
 
         {tab === "sugestao" && (
-          <section>
-            <div className="mb-4">
-              <h2 className="text-base font-semibold flex items-center gap-2">
-                Sugestão automática
-                <span className="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-[#22d3ee]/15 text-[#22d3ee] border border-[#22d3ee]/30">
-                  em breve
-                </span>
-              </h2>
-              <p className="text-xs text-[var(--text-mute)] mt-0.5">
-                PTs propostas automaticamente combinando chars compatíveis da pool.
-              </p>
-            </div>
-            <ComingSoonCard
-              title="PTs montadas automaticamente"
-              text="Quando habilitado, o sistema vai propor PTs de 5 chars de 5 players diferentes, respeitando 1 EK + 1+ ED, level e turnos compatíveis. Os 5 têm 24h pra confirmar."
-              tone="info"
-            />
-          </section>
+          <SuggestaoTab
+            mySuggestions={mySuggestions}
+            myCharIdSet={myCharIdSet}
+            lockedCharIds={lockedCharIds}
+            myPoolCount={pool?.length ?? 0}
+            cycleRan={cycleRan}
+          />
         )}
 
         {tab === "minhas" && (
@@ -518,6 +561,146 @@ export default function PrimalHubPage() {
         onClose={closeModal}
       />
     </AppShell>
+  );
+}
+
+function SuggestaoTab({
+  mySuggestions,
+  myCharIdSet,
+  lockedCharIds,
+  myPoolCount,
+  cycleRan,
+}: {
+  mySuggestions: PrimalSuggestion[] | null;
+  myCharIdSet: Set<string>;
+  lockedCharIds: Set<string>;
+  myPoolCount: number;
+  cycleRan: boolean | null;
+}) {
+  const pending = (mySuggestions ?? []).filter((s) => s.status === "pending");
+  const declined = (mySuggestions ?? []).filter((s) => s.status === "declined");
+
+  return (
+    <section>
+      <div className="mb-4">
+        <h2 className="text-base font-semibold flex items-center gap-2">
+          Sugestão automática
+        </h2>
+        <p className="text-xs text-[var(--text-mute)] mt-0.5">
+          PTs sorteadas todo dia às 10h. Todos os 5 chars envolvidos precisam aceitar até o próximo server save.
+        </p>
+      </div>
+
+      <CycleBanner />
+
+      {process.env.NODE_ENV === "development" && <DevSuggestionTools />}
+
+      {mySuggestions === null ? (
+        <div className="text-center text-sm text-[var(--text-mute)] py-10">
+          Carregando…
+        </div>
+      ) : pending.length === 0 && declined.length === 0 ? (
+        myPoolCount === 0 ? (
+          <div className="border border-dashed border-[var(--border-strong)] rounded-xl p-10 text-center">
+            <div className="text-3xl mb-2">✨</div>
+            <strong className="block text-[15px] mb-1">
+              Cadastra um char na pool primeiro
+            </strong>
+            <p className="text-sm text-[var(--text-mute)]">
+              Pra entrar nas sugestões automáticas, seu char precisa estar na
+              pool da Primal. Vai na aba <strong>Pool</strong> e cadastra.
+            </p>
+          </div>
+        ) : cycleRan ? (
+          <div className="border border-dashed border-[var(--danger)]/30 bg-[var(--danger)]/4 rounded-xl p-10 text-center">
+            <div className="text-3xl mb-2">😕</div>
+            <strong className="block text-[15px] mb-1">
+              Não rolou time pra você nessa rodada
+            </strong>
+            <p className="text-sm text-[var(--text-mute)] leading-relaxed max-w-md mx-auto">
+              Infelizmente o sistema não conseguiu encaixar nenhum dos seus
+              chars numa PT hoje — pode ser por falta de gente compatível na
+              pool, vocação faltando, ou turnos sem sobreposição. Tenta de
+              novo na próxima rodada (amanhã às <strong>10h</strong>).
+            </p>
+            <p className="text-[11px] text-[var(--text-dim)] mt-3">
+              Dica: cadastra mais chars na pool ou adiciona mais turnos de
+              disponibilidade pros chars que já estão lá.
+            </p>
+          </div>
+        ) : (
+          <div className="border border-dashed border-[var(--border-strong)] rounded-xl p-10 text-center">
+            <div className="text-3xl mb-2">⏳</div>
+            <strong className="block text-[15px] mb-1">
+              Aguardando a próxima rodada
+            </strong>
+            <p className="text-sm text-[var(--text-mute)] leading-relaxed max-w-md mx-auto">
+              As sugestões automáticas são geradas todo dia às <strong>10h</strong>.
+              Seu(s) char(s) na pool vão entrar no sorteio da próxima rodada.
+            </p>
+          </div>
+        )
+      ) : (
+        <div className="space-y-3.5">
+          {pending.map((s) => (
+            <SuggestionCard
+              key={s.id}
+              suggestion={s}
+              myCharacterIds={myCharIdSet}
+              lockedCharIds={lockedCharIds}
+            />
+          ))}
+          {declined.length > 0 && (
+            <div className="pt-4">
+              <h3 className="text-xs uppercase tracking-wider text-[var(--text-mute)] mb-2">
+                Recusadas neste ciclo
+              </h3>
+              <div className="space-y-3.5">
+                {declined.map((s) => (
+                  <SuggestionCard
+                    key={s.id}
+                    suggestion={s}
+                    myCharacterIds={myCharIdSet}
+                    lockedCharIds={lockedCharIds}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function CycleBanner() {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, []);
+  // Próximo server save = 13h UTC (10h BRT)
+  const next = new Date();
+  next.setUTCHours(13, 0, 0, 0);
+  if (next.getTime() <= now) next.setUTCDate(next.getUTCDate() + 1);
+  const diff = next.getTime() - now;
+  const h = Math.floor(diff / 3_600_000);
+  const m = Math.floor((diff % 3_600_000) / 60_000);
+  return (
+    <div className="mb-5 bg-gradient-to-br from-[var(--accent)]/8 to-transparent border border-[var(--accent)]/25 rounded-xl px-4 py-3 flex items-center gap-3 flex-wrap">
+      <span className="text-xl">🌅</span>
+      <div className="flex-1 min-w-[200px]">
+        <div className="text-[10px] uppercase tracking-wider text-[var(--accent)] font-bold">
+          Próxima rodada
+        </div>
+        <div className="text-[12px] text-[var(--text-mute)] mt-0.5">
+          Toda manhã às <strong className="text-[var(--text)]">10h</strong> · sugestões não confirmadas viram pó e novas combinações aparecem
+        </div>
+      </div>
+      <span className="font-mono text-base font-bold text-[var(--accent)] bg-[var(--accent)]/8 border border-[var(--accent)]/30 px-3 py-1.5 rounded-lg whitespace-nowrap">
+        {h}h {m}m
+      </span>
+    </div>
   );
 }
 
