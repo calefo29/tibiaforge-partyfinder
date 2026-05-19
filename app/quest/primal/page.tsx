@@ -412,13 +412,18 @@ export default function PrimalHubPage() {
             </div>
 
             {/* Minhas PTs criadas */}
-            <div>
-              <h3 className="text-xs uppercase tracking-wider text-[var(--accent)] mb-2 flex items-center gap-2">
-                <span>🛡️ Minhas PTs criadas</span>
-                <span className="text-[10px] font-bold text-[var(--accent)] bg-[var(--accent)]/15 px-1.5 py-0.5 rounded-full">
-                  {myFormingParties.length}
+            <div className="bg-[var(--accent)]/4 border border-[var(--accent)]/25 rounded-xl p-4">
+              <div className="flex items-center justify-between gap-2 mb-3 pb-3 border-b border-[var(--accent)]/20">
+                <h3 className="text-base font-bold text-[var(--accent)] flex items-center gap-2">
+                  <span>🛡️ Minhas PTs criadas</span>
+                  <span className="text-[11px] font-bold text-[#04122a] bg-[var(--accent)] px-2 py-0.5 rounded-full">
+                    {myFormingParties.length}
+                  </span>
+                </h3>
+                <span className="text-[10px] uppercase tracking-wider text-[var(--accent)]/80 font-semibold">
+                  Você é host
                 </span>
-              </h3>
+              </div>
               {allParties === null ? (
                 <div className="text-center text-sm text-[var(--text-mute)] py-6">
                   Carregando…
@@ -449,14 +454,28 @@ export default function PrimalHubPage() {
               )}
             </div>
 
+            {/* Divisor */}
+            <div className="flex items-center gap-3 my-2">
+              <div className="flex-1 h-px bg-gradient-to-r from-transparent via-[var(--border-strong)] to-transparent"></div>
+              <span className="text-[10px] uppercase tracking-[0.2em] text-[var(--text-dim)] font-semibold">
+                · · ·
+              </span>
+              <div className="flex-1 h-px bg-gradient-to-r from-transparent via-[var(--border-strong)] to-transparent"></div>
+            </div>
+
             {/* Outras PTs */}
             <div>
-              <h3 className="text-xs uppercase tracking-wider text-[var(--text-mute)] mb-2 flex items-center gap-2">
-                <span>⚔️ Outras PTs abertas</span>
-                <span className="text-[10px] font-bold text-[var(--text-mute)] bg-[var(--background-elev-2)] px-1.5 py-0.5 rounded-full border border-[var(--border)]">
-                  {othersFormingParties.length}
+              <div className="flex items-center justify-between gap-2 mb-3 pb-2 border-b border-[var(--border)]">
+                <h3 className="text-base font-bold text-[var(--text)] flex items-center gap-2">
+                  <span>⚔️ Outras PTs abertas</span>
+                  <span className="text-[11px] font-bold text-[var(--text-mute)] bg-[var(--background-elev-2)] px-2 py-0.5 rounded-full border border-[var(--border-strong)]">
+                    {othersFormingParties.length}
+                  </span>
+                </h3>
+                <span className="text-[10px] uppercase tracking-wider text-[var(--text-mute)] font-semibold">
+                  Candidate seu char
                 </span>
-              </h3>
+              </div>
               {allParties === null ? (
                 <div className="text-center text-sm text-[var(--text-mute)] py-6">
                   Carregando…

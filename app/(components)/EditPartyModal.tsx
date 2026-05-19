@@ -358,33 +358,36 @@ export function EditPartyModal({ open, party, onClose }: Props) {
             />
           </section>
 
-          {error && (
-            <div className="text-sm text-[var(--danger)] bg-[var(--danger)]/10 border border-[var(--danger)]/30 rounded-md px-3 py-2">
-              {error}
-            </div>
-          )}
         </div>
 
-        <div className="sticky bottom-0 bg-[var(--background-elev)] flex items-center justify-between gap-2 px-5 py-3 border-t border-[var(--border)]">
-          <span className="text-[11px] text-[var(--text-mute)]">
-            Alterar batentes pode tornar candidatos atuais inelegíveis.
-          </span>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="text-xs border border-[var(--border-strong)] hover:border-[var(--accent-dim)] px-3 py-1.5 rounded transition"
-            >
-              Cancelar
-            </button>
-            <button
-              type="button"
-              onClick={handleSave}
-              disabled={busy}
-              className="text-xs bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-[#04122a] font-medium px-3 py-1.5 rounded transition disabled:opacity-40"
-            >
-              {busy ? "Salvando…" : "Salvar alterações"}
-            </button>
+        <div className="sticky bottom-0 bg-[var(--background-elev)] border-t border-[var(--border)]">
+          {error && (
+            <div className="text-sm text-[var(--danger)] bg-[var(--danger)]/10 border-b border-[var(--danger)]/30 px-5 py-2.5 flex items-start gap-2">
+              <span className="text-[var(--danger)] mt-[1px]">⚠️</span>
+              <span>{error}</span>
+            </div>
+          )}
+          <div className="flex items-center justify-between gap-2 px-5 py-3">
+            <span className="text-[11px] text-[var(--text-mute)]">
+              Alterar batentes pode tornar candidatos atuais inelegíveis.
+            </span>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="text-xs border border-[var(--border-strong)] hover:border-[var(--accent-dim)] px-3 py-1.5 rounded transition"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={busy}
+                className="text-xs bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-[#04122a] font-medium px-3 py-1.5 rounded transition disabled:opacity-40"
+              >
+                {busy ? "Salvando…" : "Salvar alterações"}
+              </button>
+            </div>
           </div>
         </div>
       </div>
