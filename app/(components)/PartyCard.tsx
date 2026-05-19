@@ -69,7 +69,10 @@ export function PartyCard({
   const isCancelled = party.status === "cancelled";
   const isCompleted = party.status === "completed";
   const isDev = process.env.NODE_ENV === "development";
+  const adminUid = process.env.NEXT_PUBLIC_ADMIN_UID ?? "";
+  const isAdmin = !!adminUid && myUid === adminUid;
   const mySlot = party.slots.find((s) => s.entry?.ownerId === myUid);
+  const openSlotsForAdmin = party.slots.filter((s) => !s.entry);
 
   const handleAction = async (fn: () => Promise<void>) => {
     setBusy(true);
@@ -186,6 +189,38 @@ export function PartyCard({
 
       {!isClosed && !isCancelled && (
         <div className="pt-3 border-t border-[var(--border)] space-y-2">
+          {isAdmin && openSlotsForAdmin.length > 0 && (
+            <div className="bg-[var(--warn)]/8 border border-dashed border-[var(--warn)]/40 rounded px-2 py-1.5 space-y-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] uppercase tracking-wider text-[var(--warn)] font-bold">
+                  🛠 ADMIN — preencher com dummy
+                </span>
+                <span className="text-[10px] text-[var(--text-mute)]">
+                  {isHost ? "sua PT" : `host: ${party.hostUid.slice(0, 6)}…`}
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {openSlotsForAdmin.map((s) => {
+                  const dummy = makeDummyForSlot(s.vocation);
+                  return (
+                    <button
+                      key={s.index}
+                      type="button"
+                      disabled={busy}
+                      onClick={() =>
+                        handleAction(() =>
+                          addDummyToSlot(party.id, party, s.index, dummy)
+                        )
+                      }
+                      className="text-[10px] border border-[var(--warn)]/50 text-[var(--warn)] hover:bg-[var(--warn)]/15 px-2 py-0.5 rounded transition disabled:opacity-50"
+                    >
+                      + vaga {s.index + 1} ({dummy.vocation} {dummy.characterName} {dummy.level})
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
           {isHost && (
             <HostActions
               party={party}
@@ -202,9 +237,6 @@ export function PartyCard({
               }
               onCancel={() => handleAction(() => cancelParty(party.id))}
               onEdit={onEdit}
-              onDevFill={(idx, dummy) =>
-                handleAction(() => addDummyToSlot(party.id, party, idx, dummy))
-              }
             />
           )}
 
@@ -514,7 +546,6 @@ function HostActions({
   onClose,
   onCancel,
   onEdit,
-  onDevFill,
 }: {
   party: PrimalParty;
   busy: boolean;
@@ -524,13 +555,7 @@ function HostActions({
   onClose: () => void;
   onCancel: () => void;
   onEdit?: () => void;
-  onDevFill?: (
-    slotIndex: number,
-    dummy: { characterName: string; vocation: Vocation; level: number }
-  ) => void;
 }) {
-  const isDev = process.env.NODE_ENV === "development";
-  const openSlots = party.slots.filter((s) => !s.entry);
   const pendings = party.slots.filter(
     (s) => s.entry?.status === "pending"
   );
@@ -601,35 +626,6 @@ function HostActions({
               </button>
             </div>
           ))}
-        </div>
-      )}
-
-      {isDev && openSlots.length > 0 && onDevFill && (
-        <div className="bg-[var(--warn)]/8 border border-dashed border-[var(--warn)]/40 rounded px-2 py-1.5 space-y-1.5">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-[10px] uppercase tracking-wider text-[var(--warn)] font-bold">
-              🛠 DEV — adicionar dummy
-            </span>
-            <span className="text-[10px] text-[var(--text-mute)]">
-              só em dev, não vai pra prod
-            </span>
-          </div>
-          <div className="flex flex-wrap gap-1">
-            {openSlots.map((s) => {
-              const dummy = makeDummyForSlot(s.vocation);
-              return (
-                <button
-                  key={s.index}
-                  type="button"
-                  disabled={busy}
-                  onClick={() => onDevFill(s.index, dummy)}
-                  className="text-[10px] border border-[var(--warn)]/50 text-[var(--warn)] hover:bg-[var(--warn)]/15 px-2 py-0.5 rounded transition disabled:opacity-50"
-                >
-                  + vaga {s.index + 1} ({dummy.vocation} {dummy.characterName} {dummy.level})
-                </button>
-              );
-            })}
-          </div>
         </div>
       )}
 
