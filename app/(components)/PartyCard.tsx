@@ -1,6 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import type { Timestamp } from "firebase/firestore";
+import { useOverlayClose } from "./useOverlayClose";
 import { Character } from "@/lib/characters";
 import {
   addDummyToSlot,
@@ -41,6 +43,7 @@ type Props = {
   allPool?: PrimalPoolEntry[];
   charById: Map<string, Character>;
   hostChar: Character | null;
+  lockedCharIds?: Set<string>;
   onEdit?: () => void;
 };
 
@@ -52,6 +55,7 @@ export function PartyCard({
   allPool,
   charById,
   hostChar,
+  lockedCharIds,
   onEdit,
 }: Props) {
   const [busy, setBusy] = useState(false);
@@ -245,11 +249,12 @@ export function PartyCard({
               )}
             </div>
           )}
-          {isHost && (
+          {(isHost || isAdmin) && (
             <HostActions
               party={party}
               busy={busy}
               allConfirmed={allConfirmed}
+              isAdminViewing={!isHost && isAdmin}
               onConfirmSlot={(idx) =>
                 handleAction(() => setSlotStatus(party.id, party, idx, "confirmed"))
               }
@@ -272,6 +277,11 @@ export function PartyCard({
               onOpenPicker={(idx) => setPickerSlot(idx)}
               onWithdraw={(idx) =>
                 handleAction(() => withdrawFromSlot(party.id, party, idx))
+              }
+              onAcceptInvite={(idx) =>
+                handleAction(() =>
+                  setSlotStatus(party.id, party, idx, "confirmed")
+                )
               }
             />
           )}
@@ -371,9 +381,15 @@ export function PartyCard({
           myPoolByCharId={myPoolByCharId}
           onCancel={() => setPickerSlot(null)}
           onPick={async (charId) => {
+            const c = myChars.find((x) => x.id === charId);
+            if (!c) return;
             setPickerSlot(null);
             await handleAction(() =>
-              applyToSlot(party.id, party, pickerSlot, charId, myUid)
+              applyToSlot(party.id, party, pickerSlot, charId, myUid, {
+                characterName: c.name,
+                vocation: c.vocation,
+                level: c.level,
+              })
             );
           }}
         />
@@ -384,6 +400,7 @@ export function PartyCard({
           party={party}
           slotIndex={hostPickerSlot}
           allPool={allPool ?? []}
+          lockedCharIds={lockedCharIds}
           onCancel={() => setHostPickerSlot(null)}
           onPick={async (entry) => {
             setHostPickerSlot(null);
@@ -393,7 +410,12 @@ export function PartyCard({
                 party,
                 hostPickerSlot,
                 entry.characterId,
-                entry.ownerId
+                entry.ownerId,
+                {
+                  characterName: entry.characterName,
+                  vocation: entry.vocation as Vocation,
+                  level: entry.level,
+                }
               )
             );
           }}
@@ -554,6 +576,25 @@ function makeDummyForSlot(slotVoc: string): {
   return { characterName: name, vocation: voc, level };
 }
 
+function CountdownLabel({ expiresAt }: { expiresAt: Timestamp }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, []);
+  const remainMs = expiresAt.toMillis() - now;
+  if (remainMs <= 0) {
+    return <span className="text-[var(--danger)] text-[10px]">expirado</span>;
+  }
+  const totalMin = Math.floor(remainMs / 60_000);
+  const hours = Math.floor(totalMin / 60);
+  const minutes = totalMin % 60;
+  const label = hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+  return (
+    <span className="text-[var(--text-dim)] text-[10px]">expira em {label}</span>
+  );
+}
+
 function poolEntryByCharId(
   pool: PrimalPoolEntry[] | undefined,
   charId: string
@@ -565,6 +606,7 @@ function HostActions({
   party,
   busy,
   allConfirmed,
+  isAdminViewing,
   onConfirmSlot,
   onKickSlot,
   onClose,
@@ -574,14 +616,20 @@ function HostActions({
   party: PrimalParty;
   busy: boolean;
   allConfirmed: boolean;
+  isAdminViewing?: boolean;
   onConfirmSlot: (i: number) => void;
   onKickSlot: (i: number) => void;
   onClose: () => void;
   onCancel: () => void;
   onEdit?: () => void;
 }) {
-  const pendings = party.slots.filter(
-    (s) => s.entry?.status === "pending"
+  // Candidaturas (apply): player se candidatou e host precisa aceitar/recusar
+  const pendingApplications = party.slots.filter(
+    (s) => s.entry?.status === "pending" && (s.entry.kind ?? "apply") === "apply"
+  );
+  // Convites (invite): host convidou e player precisa aceitar — host só observa
+  const pendingInvites = party.slots.filter(
+    (s) => s.entry?.status === "pending" && s.entry.kind === "invite"
   );
   const confirmedNonHost = party.slots.filter(
     (s) =>
@@ -591,18 +639,32 @@ function HostActions({
 
   return (
     <div className="space-y-2">
-      {pendings.length > 0 && (
+      {isAdminViewing && (
+        <div className="text-[10px] uppercase tracking-wider font-bold text-[var(--warn)] bg-[var(--warn)]/8 border border-dashed border-[var(--warn)]/40 rounded px-2 py-1">
+          🛠 Visualizando como ADMIN — você não é o host dessa PT
+        </div>
+      )}
+      {pendingApplications.length > 0 && (
         <div className="text-[11px] space-y-1.5">
           <div className="text-[var(--warn)] font-semibold uppercase tracking-wider text-[10px]">
-            {pendings.length} candidatura(s) pendente(s)
+            {pendingApplications.length} candidatura(s) pendente(s)
           </div>
-          {pendings.map((s) => (
+          {pendingApplications.map((s) => (
             <div
               key={s.index}
               className="flex items-center justify-between gap-2 bg-[var(--warn)]/6 border border-[var(--warn)]/30 rounded px-2 py-1.5"
             >
               <span className="text-[11px] text-[var(--text)]">
                 Vaga {s.index + 1} · {s.vocation === "ANY" ? "Flex" : s.vocation}
+                {s.entry?.characterName && (
+                  <>
+                    {" · "}
+                    <strong className="text-[var(--text)]">
+                      {s.entry.vocation} {s.entry.characterName}
+                    </strong>{" "}
+                    <span className="text-[var(--text-dim)]">({s.entry.level})</span>
+                  </>
+                )}
               </span>
               <div className="flex gap-1.5">
                 <button
@@ -622,6 +684,46 @@ function HostActions({
                   Aceitar
                 </button>
               </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {pendingInvites.length > 0 && (
+        <div className="text-[11px] space-y-1.5">
+          <div className="text-[var(--accent)] font-semibold uppercase tracking-wider text-[10px]">
+            {pendingInvites.length} convite(s) enviado(s) — aguardando resposta
+          </div>
+          {pendingInvites.map((s) => (
+            <div
+              key={s.index}
+              className="flex items-center justify-between gap-2 bg-[var(--accent)]/6 border border-[var(--accent)]/30 rounded px-2 py-1.5"
+            >
+              <span className="text-[11px] text-[var(--text)]">
+                Vaga {s.index + 1} ·{" "}
+                {s.entry?.characterName ? (
+                  <>
+                    <strong>{s.entry.vocation} {s.entry.characterName}</strong>{" "}
+                    <span className="text-[var(--text-dim)]">({s.entry.level})</span>
+                  </>
+                ) : (
+                  <em>char convidado</em>
+                )}
+                {s.entry?.expiresAt && (
+                  <>
+                    {" · "}
+                    <CountdownLabel expiresAt={s.entry.expiresAt} />
+                  </>
+                )}
+              </span>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => onKickSlot(s.index)}
+                className="text-[10px] border border-[var(--danger)]/40 text-[var(--danger)] hover:bg-[var(--danger)]/10 px-2 py-0.5 rounded transition disabled:opacity-50"
+              >
+                Cancelar convite
+              </button>
             </div>
           ))}
         </div>
@@ -699,12 +801,14 @@ function NonHostActions({
   busy,
   onOpenPicker,
   onWithdraw,
+  onAcceptInvite,
 }: {
   party: PrimalParty;
   myUid: string;
   busy: boolean;
   onOpenPicker: (i: number) => void;
   onWithdraw: (i: number) => void;
+  onAcceptInvite: (i: number) => void;
 }) {
   const mySlots = party.slots.filter((s) => s.entry?.ownerId === myUid);
   const openSlots = party.slots.filter((s) => !s.entry);
@@ -713,19 +817,62 @@ function NonHostActions({
     <div className="space-y-2">
       {mySlots.length > 0 && (
         <div className="text-[11px] space-y-1">
-          {mySlots.map((s) => (
+          {mySlots.map((s) => {
+            const isInvite =
+              s.entry?.kind === "invite" && s.entry?.status === "pending";
+            return (
             <div
               key={s.index}
-              className="flex items-center justify-between gap-2 bg-[var(--accent)]/6 border border-[var(--accent)]/30 rounded px-2 py-1.5"
+              className={`flex items-center justify-between gap-2 rounded px-2 py-1.5 ${
+                isInvite
+                  ? "bg-[var(--warn)]/8 border border-[var(--warn)]/40"
+                  : "bg-[var(--accent)]/6 border border-[var(--accent)]/30"
+              }`}
             >
               <span className="text-[11px]">
-                Você está na vaga {s.index + 1}
-                {s.entry?.status === "pending" ? (
-                  <span className="text-[var(--warn)]"> · aguardando host</span>
+                {isInvite ? (
+                  <>
+                    <strong className="text-[var(--warn)]">
+                      Você foi convidado pra vaga {s.index + 1}
+                    </strong>
+                    {s.entry?.expiresAt && (
+                      <>
+                        {" · "}
+                        <CountdownLabel expiresAt={s.entry.expiresAt} />
+                      </>
+                    )}
+                  </>
                 ) : (
-                  <span className="text-[var(--ok)]"> · confirmado</span>
+                  <>
+                    Você está na vaga {s.index + 1}
+                    {s.entry?.status === "pending" ? (
+                      <span className="text-[var(--warn)]"> · aguardando host</span>
+                    ) : (
+                      <span className="text-[var(--ok)]"> · confirmado</span>
+                    )}
+                  </>
                 )}
               </span>
+              {isInvite ? (
+                <div className="flex gap-1.5">
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => onWithdraw(s.index)}
+                    className="text-[10px] border border-[var(--danger)]/40 text-[var(--danger)] hover:bg-[var(--danger)]/10 px-2 py-0.5 rounded transition disabled:opacity-50"
+                  >
+                    Recusar
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => onAcceptInvite(s.index)}
+                    className="text-[10px] bg-[var(--ok)] hover:brightness-110 text-[#063817] font-medium px-2 py-0.5 rounded transition disabled:opacity-50"
+                  >
+                    Aceitar
+                  </button>
+                </div>
+              ) : (
               <button
                 type="button"
                 disabled={busy}
@@ -734,8 +881,10 @@ function NonHostActions({
               >
                 Sair da PT
               </button>
+              )}
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -825,20 +974,28 @@ function SlotPicker({
   );
   const eligible = evaluated.filter((e) => e.ok);
   const blocked = evaluated.filter((e) => !e.ok);
+  const overlayProps = useOverlayClose(onCancel);
+  const [search, setSearch] = useState("");
+  const filteredEligible = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return eligible;
+    return eligible.filter(({ char: c }) =>
+      c.name.toLowerCase().includes(q)
+    );
+  }, [eligible, search]);
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65 backdrop-blur-sm"
-      onClick={onCancel}
+      {...overlayProps}
     >
       <div
         className="w-full max-w-[480px] max-h-[90vh] overflow-y-auto bg-[var(--background-elev)] border border-[var(--border)] rounded-xl p-5 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
       >
         <h3 className="text-sm font-semibold mb-1">
           Candidatar char na vaga {slotIndex + 1}
         </h3>
-        <p className="text-xs text-[var(--text-mute)] mb-4">
+        <p className="text-xs text-[var(--text-mute)] mb-3">
           Vocação:{" "}
           <strong className="text-[var(--text)]">
             {slot.vocation === "ANY" ? "Flex (qualquer)" : slot.vocation}
@@ -846,13 +1003,28 @@ function SlotPicker({
           · Mín. level {minLevel} · Servidor {party.server}
         </p>
 
+        {eligible.length > 3 && (
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="🔍 Buscar char por nome..."
+            className="w-full mb-3 bg-[var(--background)] border border-[var(--border-strong)] rounded-md px-3 py-2 text-sm focus:border-[var(--accent)] focus:outline-none"
+            autoFocus
+          />
+        )}
+
         {eligible.length === 0 ? (
           <div className="border border-dashed border-[var(--border-strong)] rounded-lg p-6 text-center text-sm text-[var(--text-mute)]">
             Nenhum char seu elegível pra essa vaga.
           </div>
+        ) : filteredEligible.length === 0 ? (
+          <div className="border border-dashed border-[var(--border-strong)] rounded-lg p-6 text-center text-sm text-[var(--text-mute)]">
+            Nenhum char bate com &quot;{search}&quot;.
+          </div>
         ) : (
           <div className="space-y-2 mb-4">
-            {eligible.map(({ char: c }) => {
+            {filteredEligible.map(({ char: c }) => {
               const vocColor = VOC_COLORS[c.vocation] ?? "text-[var(--accent)]";
               return (
                 <button
@@ -918,12 +1090,14 @@ function HostInvitePicker({
   party,
   slotIndex,
   allPool,
+  lockedCharIds,
   onCancel,
   onPick,
 }: {
   party: PrimalParty;
   slotIndex: number;
   allPool: PrimalPoolEntry[];
+  lockedCharIds?: Set<string>;
   onCancel: () => void;
   onPick: (entry: PrimalPoolEntry) => void;
 }) {
@@ -944,6 +1118,14 @@ function HostInvitePicker({
   const evaluated = useMemo(
     () =>
       vocFiltered.map((e) => {
+        // Char preso em outra PT fechada
+        if (lockedCharIds?.has(e.characterId)) {
+          return {
+            entry: e,
+            ok: false as const,
+            reason: "Char travado em outra PT fechada",
+          };
+        }
         const check = checkCandidateForSlot(
           {
             characterId: e.characterId,
@@ -962,7 +1144,7 @@ function HostInvitePicker({
         );
         return { entry: e, ...check };
       }),
-    [vocFiltered, party, slotIndex]
+    [vocFiltered, party, slotIndex, lockedCharIds]
   );
 
   // Elegíveis primeiro, depois bloqueados.
@@ -972,18 +1154,28 @@ function HostInvitePicker({
     return [...ok, ...blocked];
   }, [evaluated]);
 
-  const visible = onlyEligible ? sorted.filter((x) => x.ok) : sorted;
+  const [search, setSearch] = useState("");
+  const sortedFiltered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return sorted;
+    return sorted.filter((x) =>
+      x.entry.characterName.toLowerCase().includes(q)
+    );
+  }, [sorted, search]);
+  const visible = onlyEligible
+    ? sortedFiltered.filter((x) => x.ok)
+    : sortedFiltered;
   const eligibleCount = evaluated.filter((x) => x.ok).length;
   const blockedCount = evaluated.length - eligibleCount;
+  const overlayProps = useOverlayClose(onCancel);
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65 backdrop-blur-sm"
-      onClick={onCancel}
+      {...overlayProps}
     >
       <div
         className="w-full max-w-[560px] max-h-[90vh] overflow-y-auto bg-[var(--background-elev)] border border-[var(--border)] rounded-xl p-5 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
       >
         <h3 className="text-sm font-semibold mb-1">
           Convidar char pra vaga {slotIndex + 1}
@@ -995,6 +1187,15 @@ function HostInvitePicker({
           </strong>{" "}
           · Servidor {party.server}
         </p>
+
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="🔍 Buscar char por nome..."
+          className="w-full mb-3 bg-[var(--background)] border border-[var(--border-strong)] rounded-md px-3 py-2 text-sm focus:border-[var(--accent)] focus:outline-none"
+          autoFocus
+        />
 
         <div className="flex items-center justify-between gap-3 mb-3 bg-[var(--background)] border border-[var(--border-strong)] rounded-lg px-3 py-2">
           <span className="text-[11px] text-[var(--text-mute)]">

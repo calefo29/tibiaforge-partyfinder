@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useOverlayClose } from "./useOverlayClose";
 import { FirebaseError } from "firebase/app";
 import { Character, VOCATIONS, Vocation } from "@/lib/characters";
 import {
@@ -185,14 +186,14 @@ export function CreatePartyModal({
     }
   };
 
+  const overlayProps = useOverlayClose(onClose);
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65 backdrop-blur-sm"
-      onClick={onClose}
+      {...overlayProps}
     >
       <div
         className="w-full max-w-[640px] max-h-[92vh] overflow-y-auto bg-[var(--background-elev)] border border-[var(--border)] rounded-xl shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
       >
         <div className="sticky top-0 bg-[var(--background-elev)] z-10 flex items-center justify-between px-5 py-4 border-b border-[var(--border)]">
           <h2 className="text-base font-semibold">Criar PT da Primal Order</h2>

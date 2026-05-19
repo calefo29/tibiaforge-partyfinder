@@ -441,6 +441,7 @@ export default function PrimalHubPage() {
                       allPool={allPool ?? []}
                       charById={charsById}
                       hostChar={charsById.get(p.hostCharacterId) ?? null}
+                      lockedCharIds={lockedCharIds}
                       onEdit={() => setEditingParty(p)}
                     />
                   ))}
@@ -476,6 +477,7 @@ export default function PrimalHubPage() {
                       allPool={allPool ?? []}
                       charById={charsById}
                       hostChar={charsById.get(p.hostCharacterId) ?? null}
+                      lockedCharIds={lockedCharIds}
                     />
                   ))}
                 </div>
@@ -491,6 +493,7 @@ export default function PrimalHubPage() {
             lockedCharIds={lockedCharIds}
             myPoolCount={pool?.length ?? 0}
             cycleRan={cycleRan}
+            myUid={myUid}
           />
         )}
 
@@ -570,12 +573,14 @@ function SuggestaoTab({
   lockedCharIds,
   myPoolCount,
   cycleRan,
+  myUid,
 }: {
   mySuggestions: PrimalSuggestion[] | null;
   myCharIdSet: Set<string>;
   lockedCharIds: Set<string>;
   myPoolCount: number;
   cycleRan: boolean | null;
+  myUid: string;
 }) {
   const pending = (mySuggestions ?? []).filter((s) => s.status === "pending");
   const declined = (mySuggestions ?? []).filter((s) => s.status === "declined");

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useOverlayClose } from "./useOverlayClose";
 import { FirebaseError } from "firebase/app";
 import {
   addCharacter,
@@ -145,14 +146,14 @@ export function CharacterModal({ open, ownerId, editing, onClose, onSuccess }: P
     }
   };
 
+  const overlayProps = useOverlayClose(onClose);
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
-      onClick={onClose}
+      {...overlayProps}
     >
       <div
         className="w-full max-w-[520px] max-h-[92vh] overflow-y-auto bg-[var(--background-elev)] border border-[var(--border)] rounded-lg shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border)] sticky top-0 bg-[var(--background-elev)] z-10">
           <h2 className="text-lg font-semibold">

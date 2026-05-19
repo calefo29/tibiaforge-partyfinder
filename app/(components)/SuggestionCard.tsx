@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useOverlayClose } from "./useOverlayClose";
 import {
   acceptSuggestion,
   declineSuggestion,
@@ -225,40 +226,11 @@ export function SuggestionCard({
       )}
 
       {confirmingDecline && mySlot && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65 backdrop-blur-sm"
-          onClick={() => !busy && setConfirmingDecline(false)}
-        >
-          <div
-            className="w-full max-w-[420px] bg-[var(--background-elev)] border border-[var(--border)] rounded-xl p-5 shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 className="text-sm font-semibold mb-2 flex items-center gap-2">
-              <span className="text-[var(--danger)]">⚠️</span> Recusar a sugestão?
-            </h3>
-            <p className="text-xs text-[var(--text-mute)] leading-relaxed mb-4">
-              Ao recusar, a PT <strong className="text-[var(--text)]">não será formada</strong> neste ciclo. Os outros 4 chars envolvidos vão ter que esperar a próxima rodada (amanhã às 10h) pra entrar em outra sugestão.
-            </p>
-            <div className="flex justify-end gap-2">
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => setConfirmingDecline(false)}
-                className="text-xs border border-[var(--border-strong)] hover:border-[var(--accent-dim)] px-3 py-2 rounded transition disabled:opacity-50"
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={handleDecline}
-                className="text-xs bg-[var(--danger)] hover:brightness-110 text-white font-semibold px-3 py-2 rounded transition disabled:opacity-50"
-              >
-                {busy ? "Recusando…" : "Sim, recusar"}
-              </button>
-            </div>
-          </div>
-        </div>
+        <DeclineConfirmOverlay
+          busy={busy}
+          onCancel={() => setConfirmingDecline(false)}
+          onConfirm={handleDecline}
+        />
       )}
     </div>
   );
@@ -316,6 +288,53 @@ function DevAcceptControls({ suggestion }: { suggestion: PrimalSuggestion }) {
       {msg && (
         <div className="mt-1.5 text-[10px] font-mono text-[var(--text)]">{msg}</div>
       )}
+    </div>
+  );
+}
+
+function DeclineConfirmOverlay({
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const overlayProps = useOverlayClose(() => {
+    if (!busy) onCancel();
+  });
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65 backdrop-blur-sm"
+      {...overlayProps}
+    >
+      <div className="w-full max-w-[420px] bg-[var(--background-elev)] border border-[var(--border)] rounded-xl p-5 shadow-2xl">
+        <h3 className="text-sm font-semibold mb-2 flex items-center gap-2">
+          <span className="text-[var(--danger)]">⚠️</span> Recusar a sugestão?
+        </h3>
+        <p className="text-xs text-[var(--text-mute)] leading-relaxed mb-4">
+          Ao recusar, a PT <strong className="text-[var(--text)]">não será formada</strong> neste ciclo. Os outros 4 chars envolvidos vão ter que esperar a próxima rodada (amanhã às 10h) pra entrar em outra sugestão.
+        </p>
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onCancel}
+            className="text-xs border border-[var(--border-strong)] hover:border-[var(--accent-dim)] px-3 py-2 rounded transition disabled:opacity-50"
+          >
+            Cancelar
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onConfirm}
+            className="text-xs bg-[var(--danger)] hover:brightness-110 text-white font-semibold px-3 py-2 rounded transition disabled:opacity-50"
+          >
+            {busy ? "Recusando…" : "Sim, recusar"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

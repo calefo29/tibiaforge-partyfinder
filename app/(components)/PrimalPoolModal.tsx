@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useOverlayClose } from "./useOverlayClose";
 import { FirebaseError } from "firebase/app";
 import { Character } from "@/lib/characters";
 import {
@@ -175,14 +176,14 @@ export function PrimalPoolModal({
         ? "bg-[var(--warn)]/10 text-[var(--warn)] border-[var(--warn)]/40"
         : "bg-[var(--danger)]/10 text-[var(--danger)] border-[var(--danger)]/40";
 
+  const overlayProps = useOverlayClose(onClose);
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65 backdrop-blur-sm"
-      onClick={onClose}
+      {...overlayProps}
     >
       <div
         className="w-full max-w-[560px] max-h-[92vh] overflow-y-auto bg-[var(--background-elev)] border border-[var(--border)] rounded-xl shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
       >
         <div className="sticky top-0 bg-[var(--background-elev)] z-10 flex items-center justify-between px-5 py-4 border-b border-[var(--border)]">
           <h2 className="text-base font-semibold">

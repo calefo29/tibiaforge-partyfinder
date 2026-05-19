@@ -24,6 +24,8 @@ export const SLOT_TEMPLATE: SlotVocation[] = ["EK", "ED", "ANY", "ANY", "ANY"];
 
 export type SlotEntryStatus = "pending" | "confirmed";
 
+export type SlotEntryKind = "apply" | "invite";
+
 export type SlotEntry = {
   characterId: string;
   ownerId: string;
@@ -34,6 +36,10 @@ export type SlotEntry = {
   characterName?: string;
   vocation?: Vocation;
   level?: number;
+  // Origem da entry: apply = player se candidatou, invite = host convidou
+  kind?: SlotEntryKind;
+  // Expiração do pending (24h por padrão). Após isso, deve ser tratado como expirado.
+  expiresAt?: Timestamp | null;
 };
 
 export type Slot = {
@@ -339,16 +345,27 @@ function mapParty(d: import("firebase/firestore").QueryDocumentSnapshot): Primal
   };
 }
 
+export type ApplySnapshot = {
+  characterName: string;
+  vocation: Vocation;
+  level: number;
+};
+
 export async function applyToSlot(
   partyId: string,
   party: PrimalParty,
   slotIndex: number,
   characterId: string,
-  ownerId: string
+  ownerId: string,
+  snapshot: ApplySnapshot,
+  options?: { kind?: "apply" | "invite"; ttlHours?: number }
 ) {
   if (party.slots[slotIndex].entry) {
     throw new Error("Esta vaga já tem um candidato.");
   }
+  const kind = options?.kind ?? "apply";
+  const ttlHours = options?.ttlHours ?? 24;
+  const expiresAtMs = Date.now() + ttlHours * 60 * 60 * 1000;
   const slots = party.slots.map((s) =>
     s.index === slotIndex
       ? {
@@ -358,6 +375,11 @@ export async function applyToSlot(
             ownerId,
             status: "pending" as SlotEntryStatus,
             addedAt: Timestamp.now(),
+            characterName: snapshot.characterName,
+            vocation: snapshot.vocation,
+            level: snapshot.level,
+            kind,
+            expiresAt: Timestamp.fromMillis(expiresAtMs),
           },
         }
       : s
@@ -406,9 +428,13 @@ export async function inviteToSlot(
   party: PrimalParty,
   slotIndex: number,
   characterId: string,
-  ownerId: string
+  ownerId: string,
+  snapshot: ApplySnapshot
 ) {
-  return applyToSlot(partyId, party, slotIndex, characterId, ownerId);
+  return applyToSlot(partyId, party, slotIndex, characterId, ownerId, snapshot, {
+    kind: "invite",
+    ttlHours: 24,
+  });
 }
 
 export type UpdatePartyInput = {
@@ -499,12 +525,14 @@ export async function leaveClosedParty(
   party: PrimalParty,
   slotIndex: number
 ) {
-  const leaving = party.slots[slotIndex];
+  // Busca pela posição no array (mais seguro) E pelo s.index (compat antiga)
+  const leaving =
+    party.slots.find((s) => s.index === slotIndex) ?? party.slots[slotIndex];
   if (!leaving?.entry) throw new Error("Vaga vazia.");
   const wasHost = leaving.entry.characterId === party.hostCharacterId;
 
-  const newSlots = party.slots.map((s) =>
-    s.index === slotIndex ? { ...s, entry: null } : s
+  const newSlots = party.slots.map((s, i) =>
+    s.index === slotIndex || i === slotIndex ? { ...s, entry: null } : s
   );
   const remaining = newSlots.filter((s) => s.entry);
 

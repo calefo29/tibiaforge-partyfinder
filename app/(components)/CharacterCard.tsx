@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Character, deleteCharacter } from "@/lib/characters";
+import { useOverlayClose } from "./useOverlayClose";
 
 type Props = {
   char: Character;
@@ -155,14 +156,14 @@ function DeleteConfirmModal({
     }
   };
 
+  const overlayProps = useOverlayClose(onClose);
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65 backdrop-blur-sm"
-      onClick={onClose}
+      {...overlayProps}
     >
       <div
         className="w-full max-w-[460px] bg-[var(--background-elev)] border border-[var(--border)] rounded-lg shadow-2xl p-6"
-        onClick={(e) => e.stopPropagation()}
       >
         <div className="w-12 h-12 rounded-full bg-[var(--danger)]/12 border border-[var(--danger)]/40 flex items-center justify-center mb-4">
           <TrashIcon size={22} />
