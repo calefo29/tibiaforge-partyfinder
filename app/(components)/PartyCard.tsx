@@ -105,22 +105,55 @@ export function PartyCard({
     >
       <div className="flex items-start justify-between gap-3 mb-3 flex-wrap">
         <div className="min-w-0">
-          <div className="text-xs text-[var(--text-mute)]">
-            Host:{" "}
-            {hostChar ? (
-              <>
-                <span
-                  className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border border-[var(--border-strong)] bg-[var(--background-elev-2)] ${VOC_COLORS[hostChar.vocation] ?? ""}`}
-                >
-                  {hostChar.vocation}
-                </span>{" "}
-                <strong className="text-[var(--text)]">{hostChar.name}</strong>{" "}
-                <span className="text-[var(--text-dim)]">· {hostChar.level}</span>
-              </>
-            ) : (
-              <em>char removido</em>
-            )}
-          </div>
+          {(() => {
+            // Prioridade: charById (viewer próprio) → snapshot da party → pool entry → entry no slot do host
+            const hostSlotEntry = party.slots.find(
+              (s) => s.entry?.characterId === party.hostCharacterId
+            )?.entry;
+            const poolHost = poolEntryByCharId(allPool, party.hostCharacterId);
+            const hostName =
+              hostChar?.name ??
+              party.hostCharacterName ??
+              hostSlotEntry?.characterName ??
+              poolHost?.characterName ??
+              null;
+            const hostVoc =
+              hostChar?.vocation ??
+              party.hostVocation ??
+              hostSlotEntry?.vocation ??
+              (poolHost?.vocation as Vocation | undefined) ??
+              null;
+            const hostLvl =
+              hostChar?.level ??
+              party.hostLevel ??
+              hostSlotEntry?.level ??
+              poolHost?.level ??
+              null;
+            return (
+              <div className="text-xs text-[var(--text-mute)]">
+                Host:{" "}
+                {hostName ? (
+                  <>
+                    {hostVoc && (
+                      <>
+                        <span
+                          className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border border-[var(--border-strong)] bg-[var(--background-elev-2)] ${VOC_COLORS[hostVoc] ?? ""}`}
+                        >
+                          {hostVoc}
+                        </span>{" "}
+                      </>
+                    )}
+                    <strong className="text-[var(--text)]">{hostName}</strong>
+                    {hostLvl != null && (
+                      <span className="text-[var(--text-dim)]"> · {hostLvl}</span>
+                    )}
+                  </>
+                ) : (
+                  <em>char removido</em>
+                )}
+              </div>
+            );
+          })()}
           <div className="flex gap-3 flex-wrap text-[11px] text-[var(--text-mute)] mt-1">
             <span>📍 {party.server}</span>
           </div>

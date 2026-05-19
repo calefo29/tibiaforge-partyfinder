@@ -164,7 +164,9 @@ export function CreatePartyModal({
       await createParty({
         hostUid: ownerId,
         hostCharacterId: selectedChar.id,
+        hostCharacterName: selectedChar.name,
         hostVocation: selectedChar.vocation,
+        hostLevel: selectedChar.level,
         server: selectedChar.server,
         notes: notes.trim(),
         requirements,

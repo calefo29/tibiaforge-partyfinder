@@ -70,6 +70,10 @@ export type PrimalParty = {
   id: string;
   hostUid: string;
   hostCharacterId: string;
+  // Snapshot do host pro card renderizar mesmo se o viewer não tem o char/pool dele
+  hostCharacterName?: string;
+  hostVocation?: Vocation;
+  hostLevel?: number;
   server: string;
   notes: string;
   requirements: PartyRequirements;
@@ -83,7 +87,9 @@ export type PrimalParty = {
 export type CreatePartyInput = {
   hostUid: string;
   hostCharacterId: string;
+  hostCharacterName: string;
   hostVocation: Vocation;
+  hostLevel: number;
   server: string;
   notes: string;
   requirements: PartyRequirements;
@@ -138,12 +144,18 @@ export async function createParty(input: CreatePartyInput) {
       ownerId: input.hostUid,
       status: "confirmed",
       addedAt: Timestamp.now(),
+      characterName: input.hostCharacterName,
+      vocation: input.hostVocation,
+      level: input.hostLevel,
     },
   };
 
   return addDoc(partiesCol(), {
     hostUid: input.hostUid,
     hostCharacterId: input.hostCharacterId,
+    hostCharacterName: input.hostCharacterName,
+    hostVocation: input.hostVocation,
+    hostLevel: input.hostLevel,
     server: input.server,
     notes: input.notes,
     requirements: input.requirements,
@@ -334,6 +346,16 @@ function mapParty(d: import("firebase/firestore").QueryDocumentSnapshot): Primal
     id: d.id,
     hostUid: String(data.hostUid ?? ""),
     hostCharacterId: String(data.hostCharacterId ?? ""),
+    hostCharacterName:
+      typeof data.hostCharacterName === "string"
+        ? (data.hostCharacterName as string)
+        : undefined,
+    hostVocation:
+      typeof data.hostVocation === "string"
+        ? (data.hostVocation as Vocation)
+        : undefined,
+    hostLevel:
+      typeof data.hostLevel === "number" ? (data.hostLevel as number) : undefined,
     server: String(data.server ?? ""),
     notes: String(data.notes ?? ""),
     requirements,
@@ -556,6 +578,9 @@ export async function leaveClosedParty(
     const pick = remaining[Math.floor(Math.random() * remaining.length)];
     update.hostUid = pick.entry!.ownerId;
     update.hostCharacterId = pick.entry!.characterId;
+    if (pick.entry!.characterName) update.hostCharacterName = pick.entry!.characterName;
+    if (pick.entry!.vocation) update.hostVocation = pick.entry!.vocation;
+    if (typeof pick.entry!.level === "number") update.hostLevel = pick.entry!.level;
   }
 
   await updateDoc(doc(db, "primalParties", partyId), update);
@@ -626,12 +651,19 @@ export async function closePartyAndLock(partyId: string, party: PrimalParty) {
         });
       } else {
         const pick = remaining[Math.floor(Math.random() * remaining.length)];
-        batch.update(doc(db, "primalParties", d.id), {
+        const transferUpdate: Record<string, unknown> = {
           hostUid: pick.entry!.ownerId,
           hostCharacterId: pick.entry!.characterId,
           slots: newSlots,
           updatedAt: serverTimestamp(),
-        });
+        };
+        if (pick.entry!.characterName)
+          transferUpdate.hostCharacterName = pick.entry!.characterName;
+        if (pick.entry!.vocation)
+          transferUpdate.hostVocation = pick.entry!.vocation;
+        if (typeof pick.entry!.level === "number")
+          transferUpdate.hostLevel = pick.entry!.level;
+        batch.update(doc(db, "primalParties", d.id), transferUpdate);
       }
     } else if (slotsChanged) {
       batch.update(doc(db, "primalParties", d.id), {
