@@ -98,8 +98,6 @@ export function PrimalPoolModal({
   const canSubmit =
     !!charId && experience !== null && turnos.size >= 1 && !busy;
 
-  if (!open) return null;
-
   const toggleTurno = (t: Turno) => {
     setTurnos((prev) => {
       const next = new Set(prev);
@@ -177,6 +175,7 @@ export function PrimalPoolModal({
         : "bg-[var(--danger)]/10 text-[var(--danger)] border-[var(--danger)]/40";
 
   const overlayProps = useOverlayClose(onClose);
+  if (!open) return null;
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65 backdrop-blur-sm"

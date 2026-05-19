@@ -139,8 +139,6 @@ function DeleteConfirmModal({
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
-  if (!open) return null;
-
   const canDelete = typed.trim() === char.name;
 
   const handleDelete = async () => {
@@ -157,6 +155,7 @@ function DeleteConfirmModal({
   };
 
   const overlayProps = useOverlayClose(onClose);
+  if (!open) return null;
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65 backdrop-blur-sm"

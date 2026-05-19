@@ -126,8 +126,6 @@ export function CreatePartyModal({
     });
   };
 
-  if (!open) return null;
-
   const handleSubmit = async () => {
     setError(null);
     if (!selectedChar) {
@@ -187,6 +185,7 @@ export function CreatePartyModal({
   };
 
   const overlayProps = useOverlayClose(onClose);
+  if (!open) return null;
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65 backdrop-blur-sm"

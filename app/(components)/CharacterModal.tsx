@@ -91,8 +91,6 @@ export function CharacterModal({ open, ownerId, editing, onClose, onSuccess }: P
     };
   }, [open]);
 
-  if (!open) return null;
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -147,6 +145,7 @@ export function CharacterModal({ open, ownerId, editing, onClose, onSuccess }: P
   };
 
   const overlayProps = useOverlayClose(onClose);
+  if (!open) return null;
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"

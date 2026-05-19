@@ -77,8 +77,6 @@ export function EditPartyModal({ open, party, onClose }: Props) {
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
-  if (!open || !party) return null;
-
   const toggleTurno = (t: Turno) => {
     setReqScheduleTurnos((prev) => {
       const next = new Set(prev);
@@ -94,6 +92,7 @@ export function EditPartyModal({ open, party, onClose }: Props) {
   };
 
   const handleSave = async () => {
+    if (!party) return;
     setError(null);
     let levelValue = PRIMAL_PARTY_MIN_LEVEL;
     if (reqLevelOn) {
@@ -136,6 +135,7 @@ export function EditPartyModal({ open, party, onClose }: Props) {
   };
 
   const overlayProps = useOverlayClose(onClose);
+  if (!open || !party) return null;
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65 backdrop-blur-sm"
