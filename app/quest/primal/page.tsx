@@ -593,7 +593,8 @@ function SuggestaoTab({
 
       <CycleBanner />
 
-      {process.env.NODE_ENV === "development" && <DevSuggestionTools />}
+      {(process.env.NODE_ENV === "development" ||
+        myUid === process.env.NEXT_PUBLIC_ADMIN_UID) && <DevSuggestionTools />}
 
       {mySuggestions === null ? (
         <div className="text-center text-sm text-[var(--text-mute)] py-10">
