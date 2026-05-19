@@ -73,6 +73,9 @@ export function PartyCard({
   const isAdmin = !!adminUid && myUid === adminUid;
   const mySlot = party.slots.find((s) => s.entry?.ownerId === myUid);
   const openSlotsForAdmin = party.slots.filter((s) => !s.entry);
+  const dummySlotsForAdmin = party.slots.filter((s) =>
+    s.entry?.characterId?.startsWith("dummy_")
+  );
 
   const handleAction = async (fn: () => Promise<void>) => {
     setBusy(true);
@@ -189,36 +192,57 @@ export function PartyCard({
 
       {!isClosed && !isCancelled && (
         <div className="pt-3 border-t border-[var(--border)] space-y-2">
-          {isAdmin && openSlotsForAdmin.length > 0 && (
+          {isAdmin && (openSlotsForAdmin.length > 0 || dummySlotsForAdmin.length > 0) && (
             <div className="bg-[var(--warn)]/8 border border-dashed border-[var(--warn)]/40 rounded px-2 py-1.5 space-y-1.5">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-[10px] uppercase tracking-wider text-[var(--warn)] font-bold">
-                  🛠 ADMIN — preencher com dummy
+                  🛠 ADMIN — gerenciar dummies
                 </span>
                 <span className="text-[10px] text-[var(--text-mute)]">
                   {isHost ? "sua PT" : `host: ${party.hostUid.slice(0, 6)}…`}
                 </span>
               </div>
-              <div className="flex flex-wrap gap-1">
-                {openSlotsForAdmin.map((s) => {
-                  const dummy = makeDummyForSlot(s.vocation);
-                  return (
+              {openSlotsForAdmin.length > 0 && (
+                <div className="flex flex-wrap gap-1">
+                  {openSlotsForAdmin.map((s) => {
+                    const dummy = makeDummyForSlot(s.vocation);
+                    return (
+                      <button
+                        key={`add-${s.index}`}
+                        type="button"
+                        disabled={busy}
+                        onClick={() =>
+                          handleAction(() =>
+                            addDummyToSlot(party.id, party, s.index, dummy)
+                          )
+                        }
+                        className="text-[10px] border border-[var(--warn)]/50 text-[var(--warn)] hover:bg-[var(--warn)]/15 px-2 py-0.5 rounded transition disabled:opacity-50"
+                      >
+                        + vaga {s.index + 1} ({dummy.vocation} {dummy.characterName} {dummy.level})
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              {dummySlotsForAdmin.length > 0 && (
+                <div className="flex flex-wrap gap-1">
+                  {dummySlotsForAdmin.map((s) => (
                     <button
-                      key={s.index}
+                      key={`rm-${s.index}`}
                       type="button"
                       disabled={busy}
                       onClick={() =>
                         handleAction(() =>
-                          addDummyToSlot(party.id, party, s.index, dummy)
+                          withdrawFromSlot(party.id, party, s.index)
                         )
                       }
-                      className="text-[10px] border border-[var(--warn)]/50 text-[var(--warn)] hover:bg-[var(--warn)]/15 px-2 py-0.5 rounded transition disabled:opacity-50"
+                      className="text-[10px] border border-[var(--danger)]/40 text-[var(--danger)] hover:bg-[var(--danger)]/15 px-2 py-0.5 rounded transition disabled:opacity-50"
                     >
-                      + vaga {s.index + 1} ({dummy.vocation} {dummy.characterName} {dummy.level})
+                      − vaga {s.index + 1} ({s.entry?.vocation} {s.entry?.characterName})
                     </button>
-                  );
-                })}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
           {isHost && (
@@ -260,10 +284,10 @@ export function PartyCard({
             ✓ PT fechada — chars locked
           </div>
 
-          {isDev && isHost && (
+          {isAdmin && (
             <div className="bg-[var(--warn)]/8 border border-dashed border-[var(--warn)]/40 rounded px-2 py-1.5 space-y-1.5">
               <div className="text-[10px] uppercase tracking-wider text-[var(--warn)] font-bold">
-                🛠 DEV — expulsar de PT fechada
+                🛠 ADMIN — expulsar de PT fechada
               </div>
               <div className="flex flex-wrap gap-1">
                 {party.slots
