@@ -35,7 +35,15 @@ export function AppSidebar() {
       </div>
 
       <nav className="flex-1 px-3 pb-4 space-y-1">
-        <SectionLabel>Quests</SectionLabel>
+        <SectionLabel>Conta</SectionLabel>
+        <SideLink
+          href="/perfil"
+          icon="👤"
+          label="Meus personagens"
+          active={pathname === "/perfil"}
+        />
+
+        <SectionLabel className="mt-5">Quests</SectionLabel>
         <SideLink
           href="/quest/primal"
           icon="⚔️"
@@ -48,14 +56,6 @@ export function AppSidebar() {
           label="Soulwar"
           active={pathname?.startsWith("/quest/soulwar")}
           badge="em breve"
-        />
-
-        <SectionLabel className="mt-5">Conta</SectionLabel>
-        <SideLink
-          href="/perfil"
-          icon="👤"
-          label="Meus personagens"
-          active={pathname === "/perfil"}
         />
       </nav>
 
