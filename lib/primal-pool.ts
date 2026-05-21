@@ -157,7 +157,9 @@ export function subscribeToUserPrimalPool(
   return onSnapshot(
     q,
     (snap) => {
-      const list = snap.docs.map(mapPoolEntry);
+      const list = snap.docs
+        .map(mapPoolEntry)
+        .filter((e) => e.status === "active");
       sortPoolByRecent(list);
       cb(list);
     },
