@@ -2,11 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { Character, deleteCharacter } from "@/lib/characters";
+import { MAX_CONFIRMED_PTS_PER_CHAR } from "@/lib/primal-parties";
 import { useOverlayClose } from "./useOverlayClose";
 
 type Props = {
   char: Character;
   onEdit: (c: Character) => void;
+  /** Quantas PTs (forming+closed) esse char está confirmado em. */
+  lockCount?: number;
 };
 
 const VOC_COLORS: Record<string, string> = {
@@ -17,21 +20,39 @@ const VOC_COLORS: Record<string, string> = {
   EM: "text-[#22d3ee]",
 };
 
-export function CharacterCard({ char, onEdit }: Props) {
+export function CharacterCard({ char, onEdit, lockCount = 0 }: Props) {
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   const vocColor = VOC_COLORS[char.vocation] ?? "text-[var(--accent)]";
+  const lockFull = lockCount >= MAX_CONFIRMED_PTS_PER_CHAR;
+  const lockTone = lockFull
+    ? "bg-[var(--danger)]/15 text-[var(--danger)] border-[var(--danger)]/40"
+    : "bg-[var(--warn)]/15 text-[var(--warn)] border-[var(--warn)]/40";
 
   return (
     <>
       <div className="bg-[var(--background-elev)] border border-[var(--border)] hover:border-[var(--accent-dim)] rounded-lg p-4 transition flex flex-col">
-        <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center justify-between mb-2 gap-2">
           <span className="text-[15px] font-semibold truncate pr-2">{char.name}</span>
-          <span
-            className={`text-[11px] font-bold uppercase tracking-wider bg-[var(--background-elev-2)] border border-[var(--border-strong)] px-2 py-0.5 rounded ${vocColor}`}
-          >
-            {char.vocation}
-          </span>
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            {lockCount > 0 && (
+              <span
+                className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full border whitespace-nowrap ${lockTone}`}
+                title={
+                  lockFull
+                    ? `Char travado em ${MAX_CONFIRMED_PTS_PER_CHAR} PTs · não pode entrar em mais`
+                    : `Char travado em ${lockCount} de ${MAX_CONFIRMED_PTS_PER_CHAR} PTs`
+                }
+              >
+                🔒 {lockCount}/{MAX_CONFIRMED_PTS_PER_CHAR}
+              </span>
+            )}
+            <span
+              className={`text-[11px] font-bold uppercase tracking-wider bg-[var(--background-elev-2)] border border-[var(--border-strong)] px-2 py-0.5 rounded ${vocColor}`}
+            >
+              {char.vocation}
+            </span>
+          </div>
         </div>
 
         <div className="flex items-center justify-between text-xs text-[var(--text-mute)] pb-3 mb-3 border-b border-[var(--border)]">

@@ -1,9 +1,14 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { Character, subscribeToUserCharacters } from "@/lib/characters";
+import {
+  PrimalParty,
+  subscribeToClosedParties,
+  subscribeToFormingParties,
+} from "@/lib/primal-parties";
 import { AppShell } from "../(components)/AppShell";
 import { CharacterCard } from "../(components)/CharacterCard";
 import { CharacterModal } from "../(components)/CharacterModal";
@@ -25,6 +30,20 @@ function PerfilContent() {
   const [listError, setListError] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Character | null>(null);
+  const [formingParties, setFormingParties] = useState<PrimalParty[]>([]);
+  const [closedParties, setClosedParties] = useState<PrimalParty[]>([]);
+
+  const lockCounts = useMemo(() => {
+    const map = new Map<string, number>();
+    [...formingParties, ...closedParties].forEach((p) => {
+      p.slots.forEach((s) => {
+        const id = s.confirmed?.characterId;
+        if (!id) return;
+        map.set(id, (map.get(id) ?? 0) + 1);
+      });
+    });
+    return map;
+  }, [formingParties, closedParties]);
 
   const openCreate = () => {
     setEditing(null);
@@ -59,6 +78,16 @@ function PerfilContent() {
       (err) => setListError(err.message)
     );
     return () => unsub();
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    const unsubForming = subscribeToFormingParties(setFormingParties);
+    const unsubClosed = subscribeToClosedParties(setClosedParties);
+    return () => {
+      unsubForming();
+      unsubClosed();
+    };
   }, [user]);
 
   useEffect(() => {
@@ -124,7 +153,12 @@ function PerfilContent() {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
             {chars.map((c) => (
-              <CharacterCard key={c.id} char={c} onEdit={openEdit} />
+              <CharacterCard
+                key={c.id}
+                char={c}
+                onEdit={openEdit}
+                lockCount={lockCounts.get(c.id) ?? 0}
+              />
             ))}
           </div>
         )}
