@@ -846,12 +846,47 @@ export async function setSlotStatus(
   // status === "pending" — sem operação direta no novo modelo
 }
 
-/** Marca a PT como concluída (quest feita) — terminal, não volta. */
-export async function completeParty(partyId: string) {
-  await updateDoc(doc(db, "primalParties", partyId), {
+/**
+ * Marca a PT como concluída (quest feita) — terminal, não volta.
+ * Efeito colateral: cada char confirmado tem `questHistory.primal = true` e é
+ * removido da pool da Primal (já fez, não precisa mais de matchmaking).
+ */
+export async function completeParty(partyId: string, party?: PrimalParty) {
+  const batch = writeBatch(db);
+
+  batch.update(doc(db, "primalParties", partyId), {
     status: "completed" as PartyStatus,
     updatedAt: serverTimestamp(),
   });
+
+  const confirmedCharIds = party
+    ? Array.from(
+        new Set(
+          party.slots
+            .map((s) => s.confirmed?.characterId)
+            .filter((id): id is string => !!id)
+        )
+      )
+    : [];
+
+  for (const charId of confirmedCharIds) {
+    batch.update(doc(db, "characters", charId), {
+      "questHistory.primal": true,
+      updatedAt: serverTimestamp(),
+    });
+  }
+
+  if (confirmedCharIds.length > 0) {
+    const poolSnap = await getDocs(
+      query(
+        collection(db, "primalPool"),
+        where("characterId", "in", confirmedCharIds)
+      )
+    );
+    poolSnap.docs.forEach((d) => batch.delete(d.ref));
+  }
+
+  await batch.commit();
 }
 
 /**
