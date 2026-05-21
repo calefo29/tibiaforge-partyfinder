@@ -118,7 +118,7 @@ export function EditPartyModal({ open, party, onClose }: Props) {
       await updateParty(party.id, party, {
         notes: notes.trim(),
         requirements,
-        slotComposition: composition,
+        slotComposition: composition.map((v) => (v === "ANY" ? [] : [v])),
       });
       onClose();
     } catch (err) {

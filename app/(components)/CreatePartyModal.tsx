@@ -61,7 +61,7 @@ export function CreatePartyModal({
   );
   const [reqExperiencedOn, setReqExperiencedOn] = useState(false);
 
-  const [composition, setComposition] = useState<SlotVocation[]>([...SLOT_TEMPLATE]);
+  const [composition, setComposition] = useState<SlotVocation[]>((["EK", "ED", "ANY", "ANY", "ANY"] as SlotVocation[]));
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -77,7 +77,7 @@ export function CreatePartyModal({
       setReqScheduleOn(false);
       setReqScheduleTurnos(new Set());
       setReqExperiencedOn(false);
-      setComposition([...SLOT_TEMPLATE]);
+      setComposition((["EK", "ED", "ANY", "ANY", "ANY"] as SlotVocation[]));
       setError(null);
       setBusy(false);
     }
@@ -108,7 +108,10 @@ export function CreatePartyModal({
     ) ?? null;
 
   const hostIdx = selectedChar
-    ? hostSlotIndexFor(composition, selectedChar.vocation)
+    ? hostSlotIndexFor(
+        composition.map((v) => (v === "ANY" ? [] : [v])),
+        selectedChar.vocation
+      )
     : -1;
   const hostFits = hostIdx >= 0;
 
@@ -170,7 +173,7 @@ export function CreatePartyModal({
         server: selectedChar.server,
         notes: notes.trim(),
         requirements,
-        slotComposition: composition,
+        slotComposition: composition.map((v) => (v === "ANY" ? [] : [v])),
       });
       onClose();
     } catch (err) {

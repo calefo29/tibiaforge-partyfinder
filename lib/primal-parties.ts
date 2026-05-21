@@ -17,10 +17,12 @@ import { PrimalPoolEntry, Turno } from "./primal-pool";
 
 export const PRIMAL_PARTY_SIZE = 5;
 export const PRIMAL_PARTY_MIN_LEVEL = 600;
+export const MAX_CONFIRMED_PTS_PER_CHAR = 3;
 
-// Composição fixa: slot 0 = EK, slot 1 = ED, slots 2-4 = ANY.
-export type SlotVocation = Vocation | "ANY";
-export const SLOT_TEMPLATE: SlotVocation[] = ["EK", "ED", "ANY", "ANY", "ANY"];
+// Composição: slot 0 = EK fixo, slot 1 = ED fixo, slots 2-4 = livre (vocations[] vazio = qualquer).
+// vocations: lista de vocs aceitas; array vazio = aceita qualquer.
+export type SlotVocation = Vocation | "ANY"; // mantido p/ compat de tipos antigos
+export const SLOT_TEMPLATE: Vocation[][] = [["EK"], ["ED"], [], [], []];
 
 export type SlotEntryStatus = "pending" | "confirmed";
 
@@ -32,20 +34,29 @@ export type SlotEntry = {
   status: SlotEntryStatus;
   addedAt: Timestamp | null;
   // Snapshot opcional — fallback de exibição quando não houver char/pool entry resolvível
-  // (usado por dummies de teste e para entries cujo char foi removido).
   characterName?: string;
   vocation?: Vocation;
   level?: number;
   // Origem da entry: apply = player se candidatou, invite = host convidou
   kind?: SlotEntryKind;
-  // Expiração do pending (24h por padrão). Após isso, deve ser tratado como expirado.
+  // Expiração do pending (24h por padrão).
   expiresAt?: Timestamp | null;
 };
 
 export type Slot = {
   index: number;
-  vocation: SlotVocation;
+  /** Lista de vocações aceitas. Vazio = qualquer voc. */
+  vocations: Vocation[];
+  /** Candidaturas pendentes (player aplicou). */
+  applicants: SlotEntry[];
+  /** Convites pendentes (host convidou). */
+  invites: SlotEntry[];
+  /** Único confirmado da vaga. */
+  confirmed: SlotEntry | null;
+  /** @deprecated use slot.confirmed (populado via fallback) */
   entry: SlotEntry | null;
+  /** @deprecated use slot.vocations (populado via fallback) */
+  vocation: SlotVocation;
 };
 
 export type PartyStatus = "forming" | "closed" | "cancelled" | "completed";
@@ -70,7 +81,6 @@ export type PrimalParty = {
   id: string;
   hostUid: string;
   hostCharacterId: string;
-  // Snapshot do host pro card renderizar mesmo se o viewer não tem o char/pool dele
   hostCharacterName?: string;
   hostVocation?: Vocation;
   hostLevel?: number;
@@ -93,30 +103,52 @@ export type CreatePartyInput = {
   server: string;
   notes: string;
   requirements: PartyRequirements;
-  slotComposition: SlotVocation[];
+  /** Vocações aceitas por slot (length = 5). Vazio em slot = ANY. */
+  slotComposition: Vocation[][];
 };
 
 const partiesCol = () => collection(db, "primalParties");
 
-export function canVocFillSlot(voc: Vocation, slot: SlotVocation): boolean {
-  if (slot === "ANY") return true;
-  return slot === voc;
+export function canVocFillSlot(voc: Vocation, vocations: Vocation[]): boolean {
+  return vocations.length === 0 || vocations.includes(voc);
+}
+
+/** Resolve display label pra UI: "EK", "RP/MS", "Qualquer". */
+export function slotVocationLabel(vocations: Vocation[]): string {
+  if (vocations.length === 0) return "Qualquer";
+  return vocations.join("/");
+}
+
+/** Helper compat: traduz SlotVocation antigo pra Vocation[] novo. */
+export function legacyVocToList(v: SlotVocation): Vocation[] {
+  return v === "ANY" ? [] : [v];
 }
 
 /** First slot index in the given composition that accepts the host's vocation. */
 export function hostSlotIndexFor(
-  composition: SlotVocation[],
+  composition: Vocation[][],
   hostVoc: Vocation
 ): number {
-  return composition.findIndex((v) => canVocFillSlot(hostVoc, v));
+  return composition.findIndex((vocs) => canVocFillSlot(hostVoc, vocs));
+}
+
+function emptySlot(index: number, vocations: Vocation[]): Slot {
+  return {
+    index,
+    vocations,
+    applicants: [],
+    invites: [],
+    confirmed: null,
+    // deprecated derived
+    entry: null,
+    vocation: vocations.length === 1 ? vocations[0] : "ANY",
+  };
 }
 
 export async function createParty(input: CreatePartyInput) {
-  const slots: Slot[] = input.slotComposition.map((vocation, index) => ({
-    index,
-    vocation,
-    entry: null,
-  }));
+  const slots: Slot[] = input.slotComposition.map((vocs, index) =>
+    emptySlot(index, vocs)
+  );
   const hostIndex = hostSlotIndexFor(input.slotComposition, input.hostVocation);
   if (hostIndex < 0) {
     throw new Error(
@@ -137,17 +169,19 @@ export async function createParty(input: CreatePartyInput) {
     );
   }
 
+  const hostEntry: SlotEntry = {
+    characterId: input.hostCharacterId,
+    ownerId: input.hostUid,
+    status: "confirmed",
+    addedAt: Timestamp.now(),
+    characterName: input.hostCharacterName,
+    vocation: input.hostVocation,
+    level: input.hostLevel,
+  };
   slots[hostIndex] = {
     ...slots[hostIndex],
-    entry: {
-      characterId: input.hostCharacterId,
-      ownerId: input.hostUid,
-      status: "confirmed",
-      addedAt: Timestamp.now(),
-      characterName: input.hostCharacterName,
-      vocation: input.hostVocation,
-      level: input.hostLevel,
-    },
+    confirmed: hostEntry,
+    entry: hostEntry,
   };
 
   return addDoc(partiesCol(), {
@@ -160,7 +194,7 @@ export async function createParty(input: CreatePartyInput) {
     notes: input.notes,
     requirements: input.requirements,
     status: "forming" as PartyStatus,
-    slots,
+    slots: slots.map(serializeSlot),
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
     closedAt: null,
@@ -194,12 +228,12 @@ export function checkCandidateForSlot(
 ): { ok: boolean; reason?: string } {
   const slot = party.slots[slotIndex];
   if (!slot) return { ok: false, reason: "Vaga inválida" };
-  if (slot.entry) return { ok: false, reason: "Vaga já ocupada" };
+  if (slot.confirmed) return { ok: false, reason: "Vaga já preenchida" };
   if (cand.questDonePrimal) return { ok: false, reason: "Char já fez Primal" };
   if (party.server && cand.server !== party.server)
     return { ok: false, reason: "Servidor diferente" };
-  if (!canVocFillSlot(cand.vocation, slot.vocation))
-    return { ok: false, reason: `Vocação ${slot.vocation} requerida` };
+  if (!canVocFillSlot(cand.vocation, slot.vocations))
+    return { ok: false, reason: `Vocação ${slotVocationLabel(slot.vocations)} requerida` };
 
   const req = party.requirements ?? DEFAULT_REQUIREMENTS;
   if (req.minLevel?.active && cand.level < req.minLevel.value)
@@ -225,11 +259,19 @@ export function checkCandidateForSlot(
       return { ok: false, reason: "Precisa ter experiência na quest" };
   }
 
-  if (party.slots.some((s) => s.entry?.characterId === cand.characterId))
+  // Char já está como confirmed em alguma vaga dessa PT?
+  if (party.slots.some((s) => s.confirmed?.characterId === cand.characterId))
     return { ok: false, reason: "Char já está nessa PT" };
 
-  // 1 char por player: se outro char desse mesmo dono já está na PT, bloqueia.
-  if (party.slots.some((s) => s.entry?.ownerId === cand.ownerId))
+  // Char já se candidatou ou foi convidado pra esta vaga específica?
+  if (slot.applicants.some((a) => a.characterId === cand.characterId))
+    return { ok: false, reason: "Você já se candidatou" };
+  if (slot.invites.some((i) => i.characterId === cand.characterId))
+    return { ok: false, reason: "Convite já enviado" };
+
+  // 1 char por player na MESMA PT: se outro char desse mesmo dono já está
+  // confirmado, bloqueia (applicants/invites pendentes não bloqueiam).
+  if (party.slots.some((s) => s.confirmed?.ownerId === cand.ownerId))
     return { ok: false, reason: "Você já tem um char nessa PT" };
 
   return { ok: true };
@@ -321,15 +363,70 @@ export function subscribeToMyParties(
   );
 }
 
+function readSlot(raw: unknown, i: number): Slot {
+  const s = (raw ?? {}) as Record<string, unknown>;
+  const index = typeof s.index === "number" ? (s.index as number) : i;
+  // Lê vocations[] novo ou vocation antigo
+  let vocations: Vocation[];
+  if (Array.isArray(s.vocations)) {
+    vocations = (s.vocations as Vocation[]).filter((v) => typeof v === "string");
+  } else if (typeof s.vocation === "string") {
+    vocations = legacyVocToList(s.vocation as SlotVocation);
+  } else {
+    vocations = [];
+  }
+  const applicants = Array.isArray(s.applicants) ? (s.applicants as SlotEntry[]) : [];
+  const invites = Array.isArray(s.invites) ? (s.invites as SlotEntry[]) : [];
+  let confirmed: SlotEntry | null = null;
+  if (s.confirmed && typeof s.confirmed === "object") {
+    confirmed = s.confirmed as SlotEntry;
+  } else if (s.entry && typeof s.entry === "object") {
+    // Compat: doc antigo com single entry — se status confirmed vira confirmed,
+    // se pending vira applicants ou invites conforme kind.
+    const entry = s.entry as SlotEntry;
+    if (entry.status === "confirmed") {
+      confirmed = entry;
+    } else if (entry.kind === "invite") {
+      invites.push(entry);
+    } else {
+      applicants.push(entry);
+    }
+  }
+  return {
+    index,
+    vocations,
+    applicants,
+    invites,
+    confirmed,
+    // deprecated derived
+    entry: confirmed,
+    vocation: vocations.length === 1 ? vocations[0] : "ANY",
+  };
+}
+
+/**
+ * Serializa o slot. Mantém os campos deprecated (`entry`, `vocation`) gravados
+ * no disco também — leitores diretos (cron de sugestões, código legado) ainda
+ * dependem deles enquanto não migrarmos todo mundo.
+ */
+function serializeSlot(s: Slot): Record<string, unknown> {
+  return {
+    index: s.index,
+    vocations: s.vocations,
+    applicants: s.applicants,
+    invites: s.invites,
+    confirmed: s.confirmed,
+    // deprecated mirrors
+    entry: s.confirmed,
+    vocation: s.vocations.length === 1 ? s.vocations[0] : "ANY",
+  };
+}
+
 function mapParty(d: import("firebase/firestore").QueryDocumentSnapshot): PrimalParty {
   const data = d.data() as Record<string, unknown>;
-  const slots = ((data.slots as Slot[] | undefined) ?? []).map((s, i) => ({
-    index: typeof s.index === "number" ? s.index : i,
-    vocation: (s.vocation ?? "ANY") as SlotVocation,
-    entry: s.entry ?? null,
-  }));
+  const rawSlots = (data.slots as unknown[] | undefined) ?? [];
+  const slots = rawSlots.map(readSlot);
   const rawReq = (data.requirements ?? null) as Partial<PartyRequirements> | null;
-  // Back-compat: old docs had top-level minLevel and no requirements.
   const legacyMinLevel = typeof data.minLevel === "number"
     ? (data.minLevel as number)
     : null;
@@ -373,6 +470,40 @@ export type ApplySnapshot = {
   level: number;
 };
 
+function makeEntry(
+  characterId: string,
+  ownerId: string,
+  snapshot: ApplySnapshot,
+  kind: SlotEntryKind,
+  ttlHours: number
+): SlotEntry {
+  const expiresAtMs = Date.now() + ttlHours * 60 * 60 * 1000;
+  return {
+    characterId,
+    ownerId,
+    status: "pending",
+    addedAt: Timestamp.now(),
+    characterName: snapshot.characterName,
+    vocation: snapshot.vocation,
+    level: snapshot.level,
+    kind,
+    expiresAt: Timestamp.fromMillis(expiresAtMs),
+  };
+}
+
+function confirmedEntry(pending: SlotEntry): SlotEntry {
+  return {
+    ...pending,
+    status: "confirmed",
+    addedAt: Timestamp.now(),
+    expiresAt: null,
+  };
+}
+
+/**
+ * Player se candidata a uma vaga. Se já há invite pendente pra esse char na
+ * mesma vaga, vira confirmed imediatamente (cross-match).
+ */
 export async function applyToSlot(
   partyId: string,
   party: PrimalParty,
@@ -380,36 +511,227 @@ export async function applyToSlot(
   characterId: string,
   ownerId: string,
   snapshot: ApplySnapshot,
-  options?: { kind?: "apply" | "invite"; ttlHours?: number }
+  options?: { ttlHours?: number }
 ) {
-  if (party.slots[slotIndex].entry) {
-    throw new Error("Esta vaga já tem um candidato.");
+  const slot = party.slots[slotIndex];
+  if (!slot) throw new Error("Vaga inválida.");
+  if (slot.confirmed) throw new Error("Vaga já preenchida.");
+  if (slot.applicants.some((a) => a.characterId === characterId)) {
+    throw new Error("Você já se candidatou nessa vaga.");
   }
-  const kind = options?.kind ?? "apply";
-  const ttlHours = options?.ttlHours ?? 24;
-  const expiresAtMs = Date.now() + ttlHours * 60 * 60 * 1000;
-  const slots = party.slots.map((s) =>
-    s.index === slotIndex
-      ? {
-          ...s,
-          entry: {
-            characterId,
-            ownerId,
-            status: "pending" as SlotEntryStatus,
-            addedAt: Timestamp.now(),
-            characterName: snapshot.characterName,
-            vocation: snapshot.vocation,
-            level: snapshot.level,
-            kind,
-            expiresAt: Timestamp.fromMillis(expiresAtMs),
-          },
-        }
-      : s
-  );
+
+  const matchingInvite = slot.invites.find((i) => i.characterId === characterId);
+  let newSlot: Slot;
+  if (matchingInvite) {
+    // Cross-match: invite + apply do mesmo char na mesma vaga → confirmed
+    newSlot = {
+      ...slot,
+      applicants: [],
+      invites: [],
+      confirmed: confirmedEntry(matchingInvite),
+      entry: confirmedEntry(matchingInvite),
+    };
+  } else {
+    const ttlHours = options?.ttlHours ?? 24;
+    const entry = makeEntry(characterId, ownerId, snapshot, "apply", ttlHours);
+    newSlot = {
+      ...slot,
+      applicants: [...slot.applicants, entry],
+    };
+  }
+  const slots = party.slots.map((s) => (s.index === slotIndex ? newSlot : s));
   await updateDoc(doc(db, "primalParties", partyId), {
-    slots,
+    slots: slots.map(serializeSlot),
     updatedAt: serverTimestamp(),
   });
+}
+
+/**
+ * Host convida um char pra uma vaga. Se esse char já se candidatou, vira
+ * confirmed direto (cross-match).
+ */
+export async function inviteToSlot(
+  partyId: string,
+  party: PrimalParty,
+  slotIndex: number,
+  characterId: string,
+  ownerId: string,
+  snapshot: ApplySnapshot,
+  options?: { ttlHours?: number }
+) {
+  const slot = party.slots[slotIndex];
+  if (!slot) throw new Error("Vaga inválida.");
+  if (slot.confirmed) throw new Error("Vaga já preenchida.");
+  if (slot.invites.some((i) => i.characterId === characterId)) {
+    throw new Error("Convite já enviado pra esse char.");
+  }
+  if (!canVocFillSlot(snapshot.vocation, slot.vocations)) {
+    throw new Error("Vocação não compatível com a vaga.");
+  }
+
+  const matchingApply = slot.applicants.find((a) => a.characterId === characterId);
+  let newSlot: Slot;
+  if (matchingApply) {
+    // Cross-match: apply + invite do mesmo char → confirmed (precisa respeitar lock=3)
+    await assertLockSlotAvailable(characterId);
+    newSlot = {
+      ...slot,
+      applicants: [],
+      invites: [],
+      confirmed: confirmedEntry(matchingApply),
+      entry: confirmedEntry(matchingApply),
+    };
+  } else {
+    const ttlHours = options?.ttlHours ?? 24;
+    const entry = makeEntry(characterId, ownerId, snapshot, "invite", ttlHours);
+    newSlot = {
+      ...slot,
+      invites: [...slot.invites, entry],
+    };
+  }
+  const slots = party.slots.map((s) => (s.index === slotIndex ? newSlot : s));
+  await updateDoc(doc(db, "primalParties", partyId), {
+    slots: slots.map(serializeSlot),
+    updatedAt: serverTimestamp(),
+  });
+}
+
+/**
+ * Conta em quantas PTs (forming + closed) esse char está atualmente como
+ * confirmed. Usado pra impedir lock numa 4ª PT.
+ */
+export async function countCharLocks(characterId: string): Promise<number> {
+  const snap = await getDocs(
+    query(partiesCol(), where("status", "in", ["forming", "closed"]))
+  );
+  let count = 0;
+  snap.docs.forEach((d) => {
+    const party = mapParty(d);
+    if (party.slots.some((s) => s.confirmed?.characterId === characterId)) {
+      count++;
+    }
+  });
+  return count;
+}
+
+async function assertLockSlotAvailable(characterId: string) {
+  const locks = await countCharLocks(characterId);
+  if (locks >= MAX_CONFIRMED_PTS_PER_CHAR) {
+    throw new Error(
+      `Char travado em ${MAX_CONFIRMED_PTS_PER_CHAR} PTs · libere uma antes de confirmar.`
+    );
+  }
+}
+
+/** Host aceita uma candidatura. */
+export async function acceptApplication(
+  partyId: string,
+  party: PrimalParty,
+  slotIndex: number,
+  characterId: string
+) {
+  const slot = party.slots[slotIndex];
+  if (!slot) throw new Error("Vaga inválida.");
+  if (slot.confirmed) throw new Error("Vaga já preenchida.");
+  const applicant = slot.applicants.find((a) => a.characterId === characterId);
+  if (!applicant) throw new Error("Candidatura não encontrada.");
+
+  await assertLockSlotAvailable(characterId);
+
+  const newSlot: Slot = {
+    ...slot,
+    applicants: [],
+    invites: [],
+    confirmed: confirmedEntry(applicant),
+    entry: confirmedEntry(applicant),
+  };
+  const slots = party.slots.map((s) => (s.index === slotIndex ? newSlot : s));
+  await updateDoc(doc(db, "primalParties", partyId), {
+    slots: slots.map(serializeSlot),
+    updatedAt: serverTimestamp(),
+  });
+}
+
+/** Invitee aceita convite. */
+export async function acceptInvite(
+  partyId: string,
+  party: PrimalParty,
+  slotIndex: number,
+  characterId: string
+) {
+  const slot = party.slots[slotIndex];
+  if (!slot) throw new Error("Vaga inválida.");
+  if (slot.confirmed) throw new Error("Vaga já preenchida.");
+  const invite = slot.invites.find((i) => i.characterId === characterId);
+  if (!invite) throw new Error("Convite não encontrado.");
+
+  await assertLockSlotAvailable(characterId);
+
+  const newSlot: Slot = {
+    ...slot,
+    applicants: [],
+    invites: [],
+    confirmed: confirmedEntry(invite),
+    entry: confirmedEntry(invite),
+  };
+  const slots = party.slots.map((s) => (s.index === slotIndex ? newSlot : s));
+  await updateDoc(doc(db, "primalParties", partyId), {
+    slots: slots.map(serializeSlot),
+    updatedAt: serverTimestamp(),
+  });
+}
+
+/** Host recusa candidatura. */
+export async function declineApplication(
+  partyId: string,
+  party: PrimalParty,
+  slotIndex: number,
+  characterId: string
+) {
+  const slot = party.slots[slotIndex];
+  if (!slot) throw new Error("Vaga inválida.");
+  const newSlot: Slot = {
+    ...slot,
+    applicants: slot.applicants.filter((a) => a.characterId !== characterId),
+  };
+  const slots = party.slots.map((s) => (s.index === slotIndex ? newSlot : s));
+  await updateDoc(doc(db, "primalParties", partyId), {
+    slots: slots.map(serializeSlot),
+    updatedAt: serverTimestamp(),
+  });
+}
+
+/** Invitee recusa convite (ou host cancela). */
+export async function declineInvite(
+  partyId: string,
+  party: PrimalParty,
+  slotIndex: number,
+  characterId: string
+) {
+  const slot = party.slots[slotIndex];
+  if (!slot) throw new Error("Vaga inválida.");
+  const newSlot: Slot = {
+    ...slot,
+    invites: slot.invites.filter((i) => i.characterId !== characterId),
+  };
+  const slots = party.slots.map((s) => (s.index === slotIndex ? newSlot : s));
+  await updateDoc(doc(db, "primalParties", partyId), {
+    slots: slots.map(serializeSlot),
+    updatedAt: serverTimestamp(),
+  });
+}
+
+/** Alias semântico: host cancela convite. */
+export const cancelInvite = declineInvite;
+
+/** Player saca sua candidatura. */
+export async function withdrawApplication(
+  partyId: string,
+  party: PrimalParty,
+  slotIndex: number,
+  characterId: string
+) {
+  return declineApplication(partyId, party, slotIndex, characterId);
 }
 
 /** DEV only: insere um dummy confirmed no slot pra testar fluxos de host. */
@@ -419,53 +741,40 @@ export async function addDummyToSlot(
   slotIndex: number,
   dummy: { characterName: string; vocation: Vocation; level: number }
 ) {
-  if (party.slots[slotIndex].entry) {
-    throw new Error("Esta vaga já tem alguém.");
-  }
+  const slot = party.slots[slotIndex];
+  if (!slot) throw new Error("Vaga inválida.");
+  if (slot.confirmed) throw new Error("Esta vaga já tem alguém.");
   const fakeId = `dummy_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
-  const slots = party.slots.map((s) =>
-    s.index === slotIndex
-      ? {
-          ...s,
-          entry: {
-            characterId: fakeId,
-            ownerId: fakeId,
-            status: "confirmed" as SlotEntryStatus,
-            addedAt: Timestamp.now(),
-            characterName: dummy.characterName,
-            vocation: dummy.vocation,
-            level: dummy.level,
-          },
-        }
-      : s
-  );
+  const entry: SlotEntry = {
+    characterId: fakeId,
+    ownerId: fakeId,
+    status: "confirmed",
+    addedAt: Timestamp.now(),
+    characterName: dummy.characterName,
+    vocation: dummy.vocation,
+    level: dummy.level,
+  };
+  const newSlot: Slot = {
+    ...slot,
+    applicants: [],
+    invites: [],
+    confirmed: entry,
+    entry,
+  };
+  const slots = party.slots.map((s) => (s.index === slotIndex ? newSlot : s));
   await updateDoc(doc(db, "primalParties", partyId), {
-    slots,
+    slots: slots.map(serializeSlot),
     updatedAt: serverTimestamp(),
-  });
-}
-
-export async function inviteToSlot(
-  partyId: string,
-  party: PrimalParty,
-  slotIndex: number,
-  characterId: string,
-  ownerId: string,
-  snapshot: ApplySnapshot
-) {
-  return applyToSlot(partyId, party, slotIndex, characterId, ownerId, snapshot, {
-    kind: "invite",
-    ttlHours: 24,
   });
 }
 
 export type UpdatePartyInput = {
   notes: string;
   requirements: PartyRequirements;
-  slotComposition: SlotVocation[]; // length 5; first 2 must stay EK/ED
+  /** Composição nova (length = 5). Slots 0/1 ainda travados em EK/ED. */
+  slotComposition: Vocation[][];
 };
 
-/** Update mutable party fields. Slots 0 and 1 stay fixed (EK/ED). */
 export async function updateParty(
   partyId: string,
   party: PrimalParty,
@@ -474,42 +783,50 @@ export async function updateParty(
   if (input.slotComposition.length !== 5) {
     throw new Error("Composição precisa ter 5 vagas.");
   }
-  if (input.slotComposition[0] !== "EK" || input.slotComposition[1] !== "ED") {
-    throw new Error("Vagas 1 (EK) e 2 (ED) não podem ser alteradas.");
+  const slot0 = input.slotComposition[0];
+  const slot1 = input.slotComposition[1];
+  if (slot0.length !== 1 || slot0[0] !== "EK") {
+    throw new Error("Vaga 1 (EK) não pode ser alterada.");
   }
-  // Apply new vocations, but if a slot already has an entry whose vocation no
-  // longer matches the new requirement, clear that entry.
+  if (slot1.length !== 1 || slot1[0] !== "ED") {
+    throw new Error("Vaga 2 (ED) não pode ser alterada.");
+  }
   const newSlots: Slot[] = party.slots.map((s, i) => {
-    const newVoc = input.slotComposition[i];
-    const entry = s.entry;
-    if (entry && newVoc !== "ANY") {
-      // We can't easily verify the entry's character vocation here; trust prior write.
-      // Caller responsible for not making invalid changes.
-    }
-    return { ...s, vocation: newVoc };
+    const vocs = input.slotComposition[i];
+    return {
+      ...s,
+      vocations: vocs,
+      vocation: vocs.length === 1 ? vocs[0] : ("ANY" as SlotVocation),
+    };
   });
   await updateDoc(doc(db, "primalParties", partyId), {
     notes: input.notes,
     requirements: input.requirements,
-    slots: newSlots,
+    slots: newSlots.map(serializeSlot),
     updatedAt: serverTimestamp(),
   });
 }
 
+/** Player sai de confirmed (libera vaga sem trocar status da PT forming). */
 export async function withdrawFromSlot(
   partyId: string,
   party: PrimalParty,
   slotIndex: number
 ) {
-  const slots = party.slots.map((s) =>
-    s.index === slotIndex ? { ...s, entry: null } : s
-  );
+  const slot = party.slots[slotIndex];
+  if (!slot) throw new Error("Vaga inválida.");
+  const newSlot: Slot = { ...slot, confirmed: null, entry: null };
+  const slots = party.slots.map((s) => (s.index === slotIndex ? newSlot : s));
   await updateDoc(doc(db, "primalParties", partyId), {
-    slots,
+    slots: slots.map(serializeSlot),
     updatedAt: serverTimestamp(),
   });
 }
 
+/**
+ * @deprecated mantido só pra compat — promove pending → confirmed (usa o
+ * primeiro applicant/invite encontrado). Prefira acceptApplication/acceptInvite.
+ */
 export async function setSlotStatus(
   partyId: string,
   party: PrimalParty,
@@ -517,16 +834,16 @@ export async function setSlotStatus(
   status: SlotEntryStatus
 ) {
   const slot = party.slots[slotIndex];
-  if (!slot.entry) throw new Error("Vaga vazia.");
-  const slots = party.slots.map((s) =>
-    s.index === slotIndex && s.entry
-      ? { ...s, entry: { ...s.entry, status } }
-      : s
-  );
-  await updateDoc(doc(db, "primalParties", partyId), {
-    slots,
-    updatedAt: serverTimestamp(),
-  });
+  if (!slot) throw new Error("Vaga inválida.");
+  if (status === "confirmed") {
+    const pending = slot.applicants[0] ?? slot.invites[0];
+    if (!pending) throw new Error("Sem pendentes pra confirmar.");
+    if (slot.applicants.includes(pending)) {
+      return acceptApplication(partyId, party, slotIndex, pending.characterId);
+    }
+    return acceptInvite(partyId, party, slotIndex, pending.characterId);
+  }
+  // status === "pending" — sem operação direta no novo modelo
 }
 
 /** Marca a PT como concluída (quest feita) — terminal, não volta. */
@@ -547,21 +864,22 @@ export async function leaveClosedParty(
   party: PrimalParty,
   slotIndex: number
 ) {
-  // Busca pela posição no array (mais seguro) E pelo s.index (compat antiga)
   const leaving =
     party.slots.find((s) => s.index === slotIndex) ?? party.slots[slotIndex];
-  if (!leaving?.entry) throw new Error("Vaga vazia.");
-  const wasHost = leaving.entry.characterId === party.hostCharacterId;
+  if (!leaving?.confirmed) throw new Error("Vaga vazia.");
+  const wasHost = leaving.confirmed.characterId === party.hostCharacterId;
 
   const newSlots = party.slots.map((s, i) =>
-    s.index === slotIndex || i === slotIndex ? { ...s, entry: null } : s
+    s.index === slotIndex || i === slotIndex
+      ? { ...s, confirmed: null, entry: null }
+      : s
   );
-  const remaining = newSlots.filter((s) => s.entry);
+  const remaining = newSlots.filter((s) => s.confirmed);
 
   if (remaining.length === 0) {
     await updateDoc(doc(db, "primalParties", partyId), {
       status: "cancelled" as PartyStatus,
-      slots: newSlots,
+      slots: newSlots.map(serializeSlot),
       updatedAt: serverTimestamp(),
     });
     return;
@@ -570,17 +888,17 @@ export async function leaveClosedParty(
   const update: Record<string, unknown> = {
     status: "forming" as PartyStatus,
     closedAt: null,
-    slots: newSlots,
+    slots: newSlots.map(serializeSlot),
     updatedAt: serverTimestamp(),
   };
 
   if (wasHost) {
     const pick = remaining[Math.floor(Math.random() * remaining.length)];
-    update.hostUid = pick.entry!.ownerId;
-    update.hostCharacterId = pick.entry!.characterId;
-    if (pick.entry!.characterName) update.hostCharacterName = pick.entry!.characterName;
-    if (pick.entry!.vocation) update.hostVocation = pick.entry!.vocation;
-    if (typeof pick.entry!.level === "number") update.hostLevel = pick.entry!.level;
+    update.hostUid = pick.confirmed!.ownerId;
+    update.hostCharacterId = pick.confirmed!.characterId;
+    if (pick.confirmed!.characterName) update.hostCharacterName = pick.confirmed!.characterName;
+    if (pick.confirmed!.vocation) update.hostVocation = pick.confirmed!.vocation;
+    if (typeof pick.confirmed!.level === "number") update.hostLevel = pick.confirmed!.level;
   }
 
   await updateDoc(doc(db, "primalParties", partyId), update);
@@ -594,39 +912,31 @@ export async function cancelParty(partyId: string) {
 }
 
 /**
- * Close the party + lock the 5 confirmed characters by removing them from any
- * other forming party where they're sitting in a slot.
+ * Fecha a PT, trava os 5 chars confirmados, e em todas as outras PTs forming:
+ * - se um char locked está confirmed em outra → remove (e se for host, transfere/cancela)
+ * - se um char locked está como applicant ou invite em outra → remove a entry
  */
 export async function closePartyAndLock(partyId: string, party: PrimalParty) {
-  // 1. Make sure all 5 slots are confirmed.
-  const allConfirmed = party.slots.every(
-    (s) => s.entry?.status === "confirmed"
-  );
+  const allConfirmed = party.slots.every((s) => s.confirmed);
   if (!allConfirmed) {
     throw new Error("Todas as vagas precisam estar confirmadas pra fechar.");
   }
   const lockedCharIds = new Set(
-    party.slots.map((s) => s.entry!.characterId)
+    party.slots.map((s) => s.confirmed!.characterId)
   );
 
-  // 2. Read every other forming party.
   const formingSnap = await getDocs(
     query(partiesCol(), where("status", "==", "forming"))
   );
 
   const batch = writeBatch(db);
 
-  // 3. Close THIS party.
   batch.update(doc(db, "primalParties", partyId), {
     status: "closed" as PartyStatus,
     closedAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
 
-  // 4. For each OTHER forming party:
-  //    - clear any slot whose char is now locked
-  //    - if the host's char is locked, transfer host to a random remaining slot,
-  //      or cancel the party if there's nobody left
   formingSnap.docs.forEach((d) => {
     if (d.id === partyId) return;
     const other = mapParty(d);
@@ -634,40 +944,56 @@ export async function closePartyAndLock(partyId: string, party: PrimalParty) {
 
     let slotsChanged = false;
     const newSlots = other.slots.map((s) => {
-      if (s.entry && lockedCharIds.has(s.entry.characterId)) {
+      let next = s;
+      // Remove de applicants/invites
+      const filteredApps = s.applicants.filter(
+        (a) => !lockedCharIds.has(a.characterId)
+      );
+      const filteredInvs = s.invites.filter(
+        (i) => !lockedCharIds.has(i.characterId)
+      );
+      if (
+        filteredApps.length !== s.applicants.length ||
+        filteredInvs.length !== s.invites.length
+      ) {
+        next = { ...next, applicants: filteredApps, invites: filteredInvs };
         slotsChanged = true;
-        return { ...s, entry: null };
       }
-      return s;
+      // Remove confirmed se locked
+      if (s.confirmed && lockedCharIds.has(s.confirmed.characterId)) {
+        next = { ...next, confirmed: null, entry: null };
+        slotsChanged = true;
+      }
+      return next;
     });
 
     if (hostLocked) {
-      const remaining = newSlots.filter((s) => s.entry);
+      const remaining = newSlots.filter((s) => s.confirmed);
       if (remaining.length === 0) {
         batch.update(doc(db, "primalParties", d.id), {
           status: "cancelled" as PartyStatus,
-          slots: newSlots,
+          slots: newSlots.map(serializeSlot),
           updatedAt: serverTimestamp(),
         });
       } else {
         const pick = remaining[Math.floor(Math.random() * remaining.length)];
         const transferUpdate: Record<string, unknown> = {
-          hostUid: pick.entry!.ownerId,
-          hostCharacterId: pick.entry!.characterId,
-          slots: newSlots,
+          hostUid: pick.confirmed!.ownerId,
+          hostCharacterId: pick.confirmed!.characterId,
+          slots: newSlots.map(serializeSlot),
           updatedAt: serverTimestamp(),
         };
-        if (pick.entry!.characterName)
-          transferUpdate.hostCharacterName = pick.entry!.characterName;
-        if (pick.entry!.vocation)
-          transferUpdate.hostVocation = pick.entry!.vocation;
-        if (typeof pick.entry!.level === "number")
-          transferUpdate.hostLevel = pick.entry!.level;
+        if (pick.confirmed!.characterName)
+          transferUpdate.hostCharacterName = pick.confirmed!.characterName;
+        if (pick.confirmed!.vocation)
+          transferUpdate.hostVocation = pick.confirmed!.vocation;
+        if (typeof pick.confirmed!.level === "number")
+          transferUpdate.hostLevel = pick.confirmed!.level;
         batch.update(doc(db, "primalParties", d.id), transferUpdate);
       }
     } else if (slotsChanged) {
       batch.update(doc(db, "primalParties", d.id), {
-        slots: newSlots,
+        slots: newSlots.map(serializeSlot),
         updatedAt: serverTimestamp(),
       });
     }

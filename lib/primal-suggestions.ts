@@ -20,7 +20,6 @@ import {
   PrimalParty,
   Slot,
   SlotEntry,
-  SlotVocation,
 } from "./primal-parties";
 
 export type SuggestionStatus =
@@ -229,7 +228,7 @@ async function promoteSuggestionToParty(
   const hostIdx = Math.floor(Math.random() * sug.slots.length);
   const hostSlot = sug.slots[hostIdx];
 
-  // Monta os slots no formato PrimalParty
+  // Monta os slots no formato PrimalParty (schema novo + mirrors deprecated)
   const slots: Slot[] = sug.slots.map((s) => {
     const entry: SlotEntry = {
       characterId: s.characterId,
@@ -240,12 +239,17 @@ async function promoteSuggestionToParty(
       vocation: s.vocation,
       level: s.level,
     };
-    const slotVoc: SlotVocation =
-      s.vocation === "EK" || s.vocation === "ED" ? s.vocation : "ANY";
+    const vocations: Vocation[] =
+      s.vocation === "EK" || s.vocation === "ED" ? [s.vocation] : [];
     return {
       index: s.index,
-      vocation: slotVoc,
+      vocations,
+      applicants: [],
+      invites: [],
+      confirmed: entry,
+      // deprecated mirrors mantidos pra leitores diretos (cron, etc)
       entry,
+      vocation: vocations.length === 1 ? vocations[0] : "ANY",
     };
   });
 
