@@ -849,16 +849,18 @@ export async function setSlotStatus(
 /**
  * Marca a PT como concluída (quest feita) — terminal, não volta.
  * Efeito colateral: cada char confirmado tem `questHistory.primal = true` e é
- * removido da pool da Primal (já fez, não precisa mais de matchmaking).
+ * marcado como inactive na pool (já fez, não precisa mais de matchmaking).
+ *
+ * Estratégia de permissões:
+ * - PT escreve `confirmedCharIds: string[]` denormalizado, que as Firestore
+ *   rules consultam pra autorizar o host a alterar `characters` e `primalPool`
+ *   de outros players.
+ * - Char e pool entry recebem `lastCompletedPartyId` apontando pra esta PT.
+ * - Pool não é deletada (rules de delete não conseguem fazer cross-doc lookup
+ *   facilmente) — apenas vira `status: "inactive"`, que a query de listagem
+ *   já filtra.
  */
 export async function completeParty(partyId: string, party?: PrimalParty) {
-  const batch = writeBatch(db);
-
-  batch.update(doc(db, "primalParties", partyId), {
-    status: "completed" as PartyStatus,
-    updatedAt: serverTimestamp(),
-  });
-
   const confirmedCharIds = party
     ? Array.from(
         new Set(
@@ -869,9 +871,18 @@ export async function completeParty(partyId: string, party?: PrimalParty) {
       )
     : [];
 
+  const batch = writeBatch(db);
+
+  batch.update(doc(db, "primalParties", partyId), {
+    status: "completed" as PartyStatus,
+    confirmedCharIds,
+    updatedAt: serverTimestamp(),
+  });
+
   for (const charId of confirmedCharIds) {
     batch.update(doc(db, "characters", charId), {
       "questHistory.primal": true,
+      lastCompletedPartyId: partyId,
       updatedAt: serverTimestamp(),
     });
   }
@@ -883,7 +894,13 @@ export async function completeParty(partyId: string, party?: PrimalParty) {
         where("characterId", "in", confirmedCharIds)
       )
     );
-    poolSnap.docs.forEach((d) => batch.delete(d.ref));
+    poolSnap.docs.forEach((d) =>
+      batch.update(d.ref, {
+        status: "inactive",
+        lastCompletedPartyId: partyId,
+        updatedAt: serverTimestamp(),
+      })
+    );
   }
 
   await batch.commit();
