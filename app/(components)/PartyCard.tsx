@@ -5,19 +5,25 @@ import type { Timestamp } from "firebase/firestore";
 import { useOverlayClose } from "./useOverlayClose";
 import { Character } from "@/lib/characters";
 import {
+  acceptApplication,
+  acceptInvite,
   addDummyToSlot,
   applyToSlot,
+  cancelInvite,
   cancelParty,
-  checkCandidateForSlot,
+  canVocFillSlot,
   closePartyAndLock,
   completeParty,
+  declineApplication,
+  declineInvite,
   effectiveMinLevel,
   inviteToSlot,
   isCharEligibleForSlot,
   leaveClosedParty,
   PrimalParty,
-  setSlotStatus,
   Slot,
+  slotVocationLabel,
+  withdrawApplication,
   withdrawFromSlot,
 } from "@/lib/primal-parties";
 import { Vocation } from "@/lib/characters";
@@ -61,25 +67,26 @@ export function PartyCard({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pickerSlot, setPickerSlot] = useState<number | null>(null);
-  const [hostPickerSlot, setHostPickerSlot] = useState<number | null>(null);
+  const [managePopupSlot, setManagePopupSlot] = useState<number | null>(null);
 
   const isHost = party.hostUid === myUid;
-  const filled = party.slots.filter((s) => s.entry).length;
-  const confirmed = party.slots.filter(
-    (s) => s.entry?.status === "confirmed"
-  ).length;
-  const allConfirmed = confirmed === party.slots.length;
+  const confirmedCount = party.slots.filter((s) => s.confirmed).length;
+  const filled = confirmedCount;
+  const allConfirmed = confirmedCount === party.slots.length;
   const isClosed = party.status === "closed";
   const isCancelled = party.status === "cancelled";
   const isCompleted = party.status === "completed";
   const isDev = process.env.NODE_ENV === "development";
   const adminUid = process.env.NEXT_PUBLIC_ADMIN_UID ?? "";
   const isAdmin = !!adminUid && myUid === adminUid;
-  const mySlot = party.slots.find((s) => s.entry?.ownerId === myUid);
-  const openSlotsForAdmin = party.slots.filter((s) => !s.entry);
-  const dummySlotsForAdmin = party.slots.filter((s) =>
-    s.entry?.characterId?.startsWith("dummy_")
+  const myConfirmedSlot = party.slots.find(
+    (s) => s.confirmed?.ownerId === myUid
   );
+  const openSlotsForAdmin = party.slots.filter((s) => !s.confirmed);
+  const dummySlotsForAdmin = party.slots.filter((s) =>
+    s.confirmed?.characterId?.startsWith("dummy_")
+  );
+  const canManageAsHost = (isHost || isAdmin) && !isClosed && !isCancelled;
 
   const handleAction = async (fn: () => Promise<void>) => {
     setBusy(true);
@@ -162,7 +169,7 @@ export function PartyCard({
         <StatusBadge
           status={party.status}
           filled={filled}
-          confirmed={confirmed}
+          confirmed={confirmedCount}
           total={party.slots.length}
         />
       </div>
@@ -179,41 +186,39 @@ export function PartyCard({
             key={slot.index}
             slot={slot}
             character={
-              slot.entry ? charById.get(slot.entry.characterId) ?? null : null
+              slot.confirmed ? charById.get(slot.confirmed.characterId) ?? null : null
             }
-            isMine={slot.entry?.ownerId === myUid}
+            isMine={slot.confirmed?.ownerId === myUid}
             isHostSlot={
-              !!slot.entry && slot.entry.characterId === party.hostCharacterId
+              !!slot.confirmed && slot.confirmed.characterId === party.hostCharacterId
             }
             partyIsClosed={isClosed}
             onClick={
-              isHost && !isClosed && !isCancelled && !slot.entry
-                ? () => setHostPickerSlot(slot.index)
-                : undefined
+              canManageAsHost ? () => setManagePopupSlot(slot.index) : undefined
             }
             entryName={
-              slot.entry
-                ? charById.get(slot.entry.characterId)?.name ??
-                  poolEntryByCharId(allPool, slot.entry.characterId)
+              slot.confirmed
+                ? charById.get(slot.confirmed.characterId)?.name ??
+                  poolEntryByCharId(allPool, slot.confirmed.characterId)
                     ?.characterName ??
-                  slot.entry.characterName ??
+                  slot.confirmed.characterName ??
                   null
                 : null
             }
             entryVoc={
-              slot.entry
-                ? charById.get(slot.entry.characterId)?.vocation ??
-                  (poolEntryByCharId(allPool, slot.entry.characterId)
+              slot.confirmed
+                ? charById.get(slot.confirmed.characterId)?.vocation ??
+                  (poolEntryByCharId(allPool, slot.confirmed.characterId)
                     ?.vocation as string) ??
-                  slot.entry.vocation ??
+                  slot.confirmed.vocation ??
                   null
                 : null
             }
             entryLevel={
-              slot.entry
-                ? charById.get(slot.entry.characterId)?.level ??
-                  poolEntryByCharId(allPool, slot.entry.characterId)?.level ??
-                  slot.entry.level ??
+              slot.confirmed
+                ? charById.get(slot.confirmed.characterId)?.level ??
+                  poolEntryByCharId(allPool, slot.confirmed.characterId)?.level ??
+                  slot.confirmed.level ??
                   null
                 : null
             }
@@ -242,7 +247,7 @@ export function PartyCard({
               {openSlotsForAdmin.length > 0 && (
                 <div className="flex flex-wrap gap-1">
                   {openSlotsForAdmin.map((s) => {
-                    const dummy = makeDummyForSlot(s.vocation);
+                    const dummy = makeDummyForSlot(s.vocations);
                     return (
                       <button
                         key={`add-${s.index}`}
@@ -275,7 +280,7 @@ export function PartyCard({
                       }
                       className="text-[10px] border border-[var(--danger)]/40 text-[var(--danger)] hover:bg-[var(--danger)]/15 px-2 py-0.5 rounded transition disabled:opacity-50"
                     >
-                      − vaga {s.index + 1} ({s.entry?.vocation} {s.entry?.characterName})
+                      − vaga {s.index + 1} ({s.confirmed?.vocation} {s.confirmed?.characterName})
                     </button>
                   ))}
                 </div>
@@ -288,10 +293,7 @@ export function PartyCard({
               busy={busy}
               allConfirmed={allConfirmed}
               isAdminViewing={!isHost && isAdmin}
-              onConfirmSlot={(idx) =>
-                handleAction(() => setSlotStatus(party.id, party, idx, "confirmed"))
-              }
-              onKickSlot={(idx) =>
+              onKickConfirmed={(idx) =>
                 handleAction(() => withdrawFromSlot(party.id, party, idx))
               }
               onClose={() =>
@@ -306,15 +308,22 @@ export function PartyCard({
             <NonHostActions
               party={party}
               myUid={myUid}
+              myChars={myChars}
               busy={busy}
               onOpenPicker={(idx) => setPickerSlot(idx)}
-              onWithdraw={(idx) =>
-                handleAction(() => withdrawFromSlot(party.id, party, idx))
+              onAcceptInvite={(idx, charId) =>
+                handleAction(() => acceptInvite(party.id, party, idx, charId))
               }
-              onAcceptInvite={(idx) =>
+              onDeclineInvite={(idx, charId) =>
+                handleAction(() => declineInvite(party.id, party, idx, charId))
+              }
+              onWithdrawApplication={(idx, charId) =>
                 handleAction(() =>
-                  setSlotStatus(party.id, party, idx, "confirmed")
+                  withdrawApplication(party.id, party, idx, charId)
                 )
+              }
+              onWithdrawConfirmed={(idx) =>
+                handleAction(() => withdrawFromSlot(party.id, party, idx))
               }
             />
           )}
@@ -336,8 +345,8 @@ export function PartyCard({
                 {party.slots
                   .filter(
                     (s) =>
-                      s.entry &&
-                      s.entry.characterId !== party.hostCharacterId
+                      s.confirmed &&
+                      s.confirmed.characterId !== party.hostCharacterId
                   )
                   .map((s) => (
                     <button
@@ -356,8 +365,8 @@ export function PartyCard({
                   ))}
                 {party.slots.filter(
                   (s) =>
-                    s.entry &&
-                    s.entry.characterId !== party.hostCharacterId
+                    s.confirmed &&
+                    s.confirmed.characterId !== party.hostCharacterId
                 ).length === 0 && (
                   <span className="text-[10px] text-[var(--text-mute)]">
                     nenhum não-host pra expulsar
@@ -368,13 +377,13 @@ export function PartyCard({
           )}
 
           <div className="flex items-center justify-between gap-2 flex-wrap">
-            {mySlot ? (
+            {myConfirmedSlot ? (
               <button
                 type="button"
                 disabled={busy}
                 onClick={() =>
                   handleAction(() =>
-                    leaveClosedParty(party.id, party, mySlot.index)
+                    leaveClosedParty(party.id, party, myConfirmedSlot.index)
                   )
                 }
                 className="text-xs border border-[var(--danger)]/40 text-[var(--danger)] hover:bg-[var(--danger)]/10 px-3 py-1.5 rounded transition disabled:opacity-50"
@@ -428,20 +437,31 @@ export function PartyCard({
         />
       )}
 
-      {hostPickerSlot !== null && (
-        <HostInvitePicker
+      {managePopupSlot !== null && (
+        <SlotManagePopup
           party={party}
-          slotIndex={hostPickerSlot}
+          slotIndex={managePopupSlot}
           allPool={allPool ?? []}
+          charById={charById}
           lockedCharIds={lockedCharIds}
-          onCancel={() => setHostPickerSlot(null)}
-          onPick={async (entry) => {
-            setHostPickerSlot(null);
-            await handleAction(() =>
+          busy={busy}
+          onClose={() => setManagePopupSlot(null)}
+          onAcceptApplication={(charId) =>
+            handleAction(() =>
+              acceptApplication(party.id, party, managePopupSlot, charId)
+            )
+          }
+          onDeclineApplication={(charId) =>
+            handleAction(() =>
+              declineApplication(party.id, party, managePopupSlot, charId)
+            )
+          }
+          onInvite={(entry) =>
+            handleAction(() =>
               inviteToSlot(
                 party.id,
                 party,
-                hostPickerSlot,
+                managePopupSlot,
                 entry.characterId,
                 entry.ownerId,
                 {
@@ -450,8 +470,18 @@ export function PartyCard({
                   level: entry.level,
                 }
               )
-            );
-          }}
+            )
+          }
+          onCancelInvite={(charId) =>
+            handleAction(() =>
+              cancelInvite(party.id, party, managePopupSlot, charId)
+            )
+          }
+          onKickConfirmed={() =>
+            handleAction(() =>
+              withdrawFromSlot(party.id, party, managePopupSlot)
+            )
+          }
         />
       )}
     </div>
@@ -523,50 +553,79 @@ function SlotCell({
   entryVoc: string | null;
   entryLevel: number | null;
 }) {
-  const vocLabel = slot.vocation === "ANY" ? "Flex" : slot.vocation;
+  const vocLabel = slotVocationLabel(slot.vocations);
+  const applicantCount = slot.applicants.length;
+  const hasApplicants = applicantCount > 0;
+  const clickable = !!onClick;
 
-  if (!slot.entry) {
-    const clickable = !!onClick;
+  if (!slot.confirmed) {
+    // Vaga aberta: visual amarelo se tem inscrições, azul tracejado se vazia.
+    const tinted = hasApplicants;
     return (
       <button
         type="button"
         onClick={onClick}
         disabled={!clickable}
-        className={`p-2 rounded-md border border-dashed min-h-[68px] flex flex-col items-center justify-center text-center transition w-full ${
-          clickable
-            ? "border-[var(--accent)] bg-[var(--accent)]/4 hover:bg-[var(--accent)]/12 hover:border-[var(--accent)] cursor-pointer"
-            : "border-[var(--accent-dim)] bg-[var(--accent)]/4 cursor-default"
+        className={`relative p-2 rounded-md border min-h-[68px] flex flex-col items-center justify-center text-center transition w-full ${
+          tinted
+            ? `border-[var(--warn)]/50 bg-[var(--warn)]/10 ${
+                clickable ? "hover:bg-[var(--warn)]/18 cursor-pointer" : ""
+              }`
+            : clickable
+              ? "border-dashed border-[var(--accent)] bg-[var(--accent)]/4 hover:bg-[var(--accent)]/12 cursor-pointer"
+              : "border-dashed border-[var(--accent-dim)] bg-[var(--accent)]/4 cursor-default"
         }`}
-        title={clickable ? "Clique pra convidar um char" : undefined}
+        title={
+          tinted
+            ? `${applicantCount} inscrito(s) aguardando você`
+            : clickable
+              ? "Clique para gerenciar"
+              : undefined
+        }
       >
-        <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--warn)]">
-          {vocLabel}
+        {hasApplicants && (
+          <span
+            className="absolute -top-1 -right-1 inline-flex items-center justify-center w-5 h-5 rounded-full bg-[var(--warn)] text-[#1a1200] font-black text-[12px] shadow"
+            aria-label={`${applicantCount} inscritos`}
+          >
+            !
+          </span>
+        )}
+        <div
+          className={`text-[10px] font-bold uppercase tracking-wider ${
+            tinted ? "text-[var(--warn)]" : "text-[var(--warn)]"
+          }`}
+        >
+          {vocLabel === "Qualquer" ? "Flex" : vocLabel}
         </div>
         <div className="text-[10px] text-[var(--text-mute)] mt-1">
-          {clickable ? "+ convidar" : "Vaga aberta"}
+          {hasApplicants ? `${applicantCount} inscrito(s)` : clickable ? "+ convidar" : "Vaga aberta"}
         </div>
       </button>
     );
   }
 
-  const pending = slot.entry.status === "pending";
-  const cellBorder = pending
-    ? "border-[var(--warn)] bg-[var(--warn)]/6"
-    : partyIsClosed
-      ? "border-[var(--ok)] bg-[var(--ok)]/8"
-      : "border-[var(--ok)]/40 bg-[var(--ok)]/5";
+  const cellBorder = partyIsClosed
+    ? "border-[var(--ok)] bg-[var(--ok)]/8"
+    : "border-[var(--ok)]/40 bg-[var(--ok)]/5";
   const vocColor = entryVoc
     ? VOC_COLORS[entryVoc] ?? "text-[var(--accent)]"
     : "text-[var(--text-mute)]";
+  const interactive = clickable;
+  const Wrapper: "button" | "div" = interactive ? "button" : "div";
 
   return (
-    <div
-      className={`p-2 rounded-md border min-h-[68px] flex flex-col items-center justify-center text-center ${cellBorder}`}
+    <Wrapper
+      type={interactive ? "button" : undefined}
+      onClick={interactive ? onClick : undefined}
+      className={`p-2 rounded-md border min-h-[68px] flex flex-col items-center justify-center text-center w-full ${cellBorder} ${
+        interactive ? "cursor-pointer hover:brightness-110 transition" : ""
+      }`}
     >
       <div
         className={`text-[10px] font-bold uppercase tracking-wider ${vocColor}`}
       >
-        {entryVoc ?? vocLabel}
+        {entryVoc ?? (vocLabel === "Qualquer" ? "Flex" : vocLabel)}
       </div>
       <div className="text-[11px] text-[var(--text)] font-medium mt-0.5 truncate w-full">
         {entryName ?? "removido"}
@@ -574,18 +633,13 @@ function SlotCell({
       <div className="text-[9px] text-[var(--text-dim)] tabular-nums">
         {entryLevel ?? "—"}
       </div>
-      {pending && (
-        <div className="text-[9px] font-bold text-[var(--warn)] uppercase mt-0.5">
-          pendente
-        </div>
-      )}
       {isHostSlot && (
         <div className="text-[9px] text-[var(--accent)] uppercase mt-0.5">host</div>
       )}
       {isMine && !isHostSlot && (
         <div className="text-[9px] text-[var(--accent)] uppercase mt-0.5">você</div>
       )}
-    </div>
+    </Wrapper>
   );
 }
 
@@ -593,17 +647,14 @@ const DUMMY_NAMES = [
   "Dummy Bot", "Test Hero", "Mock Char", "Fake Knight", "Sim Druid",
   "Phantom MS", "Echo RP", "Ghost EM", "Probe Char", "Stub Player",
 ];
-function makeDummyForSlot(slotVoc: string): {
+function makeDummyForSlot(slotVocations: Vocation[]): {
   characterName: string;
   vocation: Vocation;
   level: number;
 } {
-  const voc: Vocation =
-    slotVoc === "ANY"
-      ? (["EK", "ED", "MS", "RP", "EM"] as Vocation[])[
-          Math.floor(Math.random() * 5)
-        ]
-      : (slotVoc as Vocation);
+  const ALL_VOCS: Vocation[] = ["EK", "ED", "MS", "RP", "EM"];
+  const pool = slotVocations.length === 0 ? ALL_VOCS : slotVocations;
+  const voc = pool[Math.floor(Math.random() * pool.length)];
   const name = DUMMY_NAMES[Math.floor(Math.random() * DUMMY_NAMES.length)];
   const level = 600 + Math.floor(Math.random() * 400);
   return { characterName: name, vocation: voc, level };
@@ -640,8 +691,7 @@ function HostActions({
   busy,
   allConfirmed,
   isAdminViewing,
-  onConfirmSlot,
-  onKickSlot,
+  onKickConfirmed,
   onClose,
   onCancel,
   onEdit,
@@ -650,24 +700,21 @@ function HostActions({
   busy: boolean;
   allConfirmed: boolean;
   isAdminViewing?: boolean;
-  onConfirmSlot: (i: number) => void;
-  onKickSlot: (i: number) => void;
+  onKickConfirmed: (i: number) => void;
   onClose: () => void;
   onCancel: () => void;
   onEdit?: () => void;
 }) {
-  // Candidaturas (apply): player se candidatou e host precisa aceitar/recusar
-  const pendingApplications = party.slots.filter(
-    (s) => s.entry?.status === "pending" && (s.entry.kind ?? "apply") === "apply"
+  const slotsWithApplicants = party.slots.filter(
+    (s) => !s.confirmed && s.applicants.length > 0
   );
-  // Convites (invite): host convidou e player precisa aceitar — host só observa
-  const pendingInvites = party.slots.filter(
-    (s) => s.entry?.status === "pending" && s.entry.kind === "invite"
+  const slotsWithInvitesOnly = party.slots.filter(
+    (s) => !s.confirmed && s.invites.length > 0 && s.applicants.length === 0
   );
   const confirmedNonHost = party.slots.filter(
     (s) =>
-      s.entry?.status === "confirmed" &&
-      s.entry.characterId !== party.hostCharacterId
+      s.confirmed &&
+      s.confirmed.characterId !== party.hostCharacterId
   );
 
   return (
@@ -677,88 +724,22 @@ function HostActions({
           🛠 Visualizando como ADMIN — você não é o host dessa PT
         </div>
       )}
-      {pendingApplications.length > 0 && (
-        <div className="text-[11px] space-y-1.5">
-          <div className="text-[var(--warn)] font-semibold uppercase tracking-wider text-[10px]">
-            {pendingApplications.length} candidatura(s) pendente(s)
-          </div>
-          {pendingApplications.map((s) => (
-            <div
-              key={s.index}
-              className="flex items-center justify-between gap-2 bg-[var(--warn)]/6 border border-[var(--warn)]/30 rounded px-2 py-1.5"
-            >
-              <span className="text-[11px] text-[var(--text)]">
-                Vaga {s.index + 1} · {s.vocation === "ANY" ? "Flex" : s.vocation}
-                {s.entry?.characterName && (
-                  <>
-                    {" · "}
-                    <strong className="text-[var(--text)]">
-                      {s.entry.vocation} {s.entry.characterName}
-                    </strong>{" "}
-                    <span className="text-[var(--text-dim)]">({s.entry.level})</span>
-                  </>
-                )}
-              </span>
-              <div className="flex gap-1.5">
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => onKickSlot(s.index)}
-                  className="text-[10px] border border-[var(--danger)]/40 text-[var(--danger)] hover:bg-[var(--danger)]/10 px-2 py-0.5 rounded transition disabled:opacity-50"
-                >
-                  Recusar
-                </button>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => onConfirmSlot(s.index)}
-                  className="text-[10px] bg-[var(--ok)] hover:brightness-110 text-[#063817] font-medium px-2 py-0.5 rounded transition disabled:opacity-50"
-                >
-                  Aceitar
-                </button>
-              </div>
-            </div>
-          ))}
+      {slotsWithApplicants.length > 0 && (
+        <div className="text-[11px] bg-[var(--warn)]/6 border border-[var(--warn)]/30 rounded px-3 py-1.5 text-[var(--warn)] font-semibold flex items-center gap-2">
+          <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-[var(--warn)] text-[#1a1200] font-black text-[11px]">!</span>
+          {slotsWithApplicants
+            .map((s) => `Vaga ${s.index + 1} (${s.applicants.length})`)
+            .join(", ")}
+          {" — "}clique na vaga pra ver inscritos
         </div>
       )}
-
-      {pendingInvites.length > 0 && (
-        <div className="text-[11px] space-y-1.5">
-          <div className="text-[var(--accent)] font-semibold uppercase tracking-wider text-[10px]">
-            {pendingInvites.length} convite(s) enviado(s) — aguardando resposta
-          </div>
-          {pendingInvites.map((s) => (
-            <div
-              key={s.index}
-              className="flex items-center justify-between gap-2 bg-[var(--accent)]/6 border border-[var(--accent)]/30 rounded px-2 py-1.5"
-            >
-              <span className="text-[11px] text-[var(--text)]">
-                Vaga {s.index + 1} ·{" "}
-                {s.entry?.characterName ? (
-                  <>
-                    <strong>{s.entry.vocation} {s.entry.characterName}</strong>{" "}
-                    <span className="text-[var(--text-dim)]">({s.entry.level})</span>
-                  </>
-                ) : (
-                  <em>char convidado</em>
-                )}
-                {s.entry?.expiresAt && (
-                  <>
-                    {" · "}
-                    <CountdownLabel expiresAt={s.entry.expiresAt} />
-                  </>
-                )}
-              </span>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => onKickSlot(s.index)}
-                className="text-[10px] border border-[var(--danger)]/40 text-[var(--danger)] hover:bg-[var(--danger)]/10 px-2 py-0.5 rounded transition disabled:opacity-50"
-              >
-                Cancelar convite
-              </button>
-            </div>
-          ))}
+      {slotsWithInvitesOnly.length > 0 && (
+        <div className="text-[10px] text-[var(--text-mute)]">
+          Convites enviados:{" "}
+          {slotsWithInvitesOnly
+            .map((s) => `vaga ${s.index + 1} (${s.invites.length})`)
+            .join(", ")}
+          {" — "}aguardando resposta
         </div>
       )}
 
@@ -773,12 +754,23 @@ function HostActions({
               className="flex items-center justify-between gap-2 bg-[var(--ok)]/6 border border-[var(--ok)]/25 rounded px-2 py-1.5"
             >
               <span className="text-[11px] text-[var(--text)]">
-                Vaga {s.index + 1} · {s.vocation === "ANY" ? "Flex" : s.vocation}
+                Vaga {s.index + 1} · {slotVocationLabel(s.vocations) === "Qualquer" ? "Flex" : slotVocationLabel(s.vocations)}
+                {s.confirmed?.characterName && (
+                  <>
+                    {" · "}
+                    <strong>
+                      {s.confirmed.vocation} {s.confirmed.characterName}
+                    </strong>{" "}
+                    <span className="text-[var(--text-dim)]">
+                      ({s.confirmed.level})
+                    </span>
+                  </>
+                )}
               </span>
               <button
                 type="button"
                 disabled={busy}
-                onClick={() => onKickSlot(s.index)}
+                onClick={() => onKickConfirmed(s.index)}
                 className="text-[10px] border border-[var(--danger)]/40 text-[var(--danger)] hover:bg-[var(--danger)]/10 px-2 py-0.5 rounded transition disabled:opacity-50"
               >
                 Expulsar
@@ -828,94 +820,164 @@ function HostActions({
   );
 }
 
+type MyEntryState =
+  | { kind: "confirmed"; slot: Slot; charId: string }
+  | { kind: "apply"; slot: Slot; charId: string; competitors: number; expiresAt?: Timestamp | null }
+  | { kind: "invite"; slot: Slot; charId: string; expiresAt?: Timestamp | null };
+
 function NonHostActions({
   party,
   myUid,
+  myChars,
   busy,
   onOpenPicker,
-  onWithdraw,
   onAcceptInvite,
+  onDeclineInvite,
+  onWithdrawApplication,
+  onWithdrawConfirmed,
 }: {
   party: PrimalParty;
   myUid: string;
+  myChars: Character[];
   busy: boolean;
   onOpenPicker: (i: number) => void;
-  onWithdraw: (i: number) => void;
-  onAcceptInvite: (i: number) => void;
+  onAcceptInvite: (i: number, charId: string) => void;
+  onDeclineInvite: (i: number, charId: string) => void;
+  onWithdrawApplication: (i: number, charId: string) => void;
+  onWithdrawConfirmed: (i: number) => void;
 }) {
-  const mySlots = party.slots.filter((s) => s.entry?.ownerId === myUid);
-  const openSlots = party.slots.filter((s) => !s.entry);
+  const myCharIds = useMemo(() => new Set(myChars.map((c) => c.id)), [myChars]);
+
+  const myEntries: MyEntryState[] = useMemo(() => {
+    const out: MyEntryState[] = [];
+    party.slots.forEach((s) => {
+      if (s.confirmed?.ownerId === myUid) {
+        out.push({ kind: "confirmed", slot: s, charId: s.confirmed.characterId });
+        return;
+      }
+      const myInv = s.invites.find(
+        (i) => i.ownerId === myUid || myCharIds.has(i.characterId)
+      );
+      if (myInv) {
+        out.push({
+          kind: "invite",
+          slot: s,
+          charId: myInv.characterId,
+          expiresAt: myInv.expiresAt ?? null,
+        });
+      }
+      const myApp = s.applicants.find(
+        (a) => a.ownerId === myUid || myCharIds.has(a.characterId)
+      );
+      if (myApp) {
+        out.push({
+          kind: "apply",
+          slot: s,
+          charId: myApp.characterId,
+          competitors: s.applicants.length - 1,
+          expiresAt: myApp.expiresAt ?? null,
+        });
+      }
+    });
+    return out;
+  }, [party.slots, myUid, myCharIds]);
+
+  const openSlots = party.slots.filter((s) => !s.confirmed);
 
   return (
     <div className="space-y-2">
-      {mySlots.length > 0 && (
+      {myEntries.length > 0 && (
         <div className="text-[11px] space-y-1">
-          {mySlots.map((s) => {
-            const isInvite =
-              s.entry?.kind === "invite" && s.entry?.status === "pending";
-            return (
-            <div
-              key={s.index}
-              className={`flex items-center justify-between gap-2 rounded px-2 py-1.5 ${
-                isInvite
-                  ? "bg-[var(--warn)]/8 border border-[var(--warn)]/40"
-                  : "bg-[var(--accent)]/6 border border-[var(--accent)]/30"
-              }`}
-            >
-              <span className="text-[11px]">
-                {isInvite ? (
-                  <>
+          {myEntries.map((e) => {
+            const slotLabel = `Vaga ${e.slot.index + 1}`;
+            if (e.kind === "invite") {
+              return (
+                <div
+                  key={`inv-${e.slot.index}-${e.charId}`}
+                  className="flex items-center justify-between gap-2 rounded px-2 py-1.5 bg-[var(--warn)]/8 border border-[var(--warn)]/40"
+                >
+                  <span className="text-[11px]">
                     <strong className="text-[var(--warn)]">
-                      Você foi convidado pra vaga {s.index + 1}
+                      Você foi convidado pra {slotLabel}
                     </strong>
-                    {s.entry?.expiresAt && (
+                    {e.expiresAt && (
                       <>
                         {" · "}
-                        <CountdownLabel expiresAt={s.entry.expiresAt} />
+                        <CountdownLabel expiresAt={e.expiresAt} />
                       </>
                     )}
-                  </>
-                ) : (
-                  <>
-                    Você está na vaga {s.index + 1}
-                    {s.entry?.status === "pending" ? (
-                      <span className="text-[var(--warn)]"> · aguardando host</span>
+                  </span>
+                  <div className="flex gap-1.5">
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => onDeclineInvite(e.slot.index, e.charId)}
+                      className="text-[10px] border border-[var(--danger)]/40 text-[var(--danger)] hover:bg-[var(--danger)]/10 px-2 py-0.5 rounded transition disabled:opacity-50"
+                    >
+                      Recusar
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => onAcceptInvite(e.slot.index, e.charId)}
+                      className="text-[10px] bg-[var(--ok)] hover:brightness-110 text-[#063817] font-medium px-2 py-0.5 rounded transition disabled:opacity-50"
+                    >
+                      Aceitar
+                    </button>
+                  </div>
+                </div>
+              );
+            }
+            if (e.kind === "apply") {
+              return (
+                <div
+                  key={`app-${e.slot.index}-${e.charId}`}
+                  className="flex items-center justify-between gap-2 rounded px-2 py-1.5 bg-[var(--accent)]/6 border border-[var(--accent)]/30"
+                >
+                  <span className="text-[11px]">
+                    Sua candidatura na {slotLabel}
+                    {e.competitors > 0 ? (
+                      <span className="text-[var(--text-mute)]">
+                        {" · concorrendo com mais "}
+                        <strong className="text-[var(--text)]">
+                          {e.competitors}
+                        </strong>
+                      </span>
                     ) : (
-                      <span className="text-[var(--ok)]"> · confirmado</span>
+                      <span className="text-[var(--text-mute)]">
+                        {" · aguardando host"}
+                      </span>
                     )}
-                  </>
-                )}
-              </span>
-              {isInvite ? (
-                <div className="flex gap-1.5">
+                  </span>
                   <button
                     type="button"
                     disabled={busy}
-                    onClick={() => onWithdraw(s.index)}
+                    onClick={() => onWithdrawApplication(e.slot.index, e.charId)}
                     className="text-[10px] border border-[var(--danger)]/40 text-[var(--danger)] hover:bg-[var(--danger)]/10 px-2 py-0.5 rounded transition disabled:opacity-50"
                   >
-                    Recusar
-                  </button>
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => onAcceptInvite(s.index)}
-                    className="text-[10px] bg-[var(--ok)] hover:brightness-110 text-[#063817] font-medium px-2 py-0.5 rounded transition disabled:opacity-50"
-                  >
-                    Aceitar
+                    Cancelar
                   </button>
                 </div>
-              ) : (
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => onWithdraw(s.index)}
-                className="text-[10px] border border-[var(--danger)]/40 text-[var(--danger)] hover:bg-[var(--danger)]/10 px-2 py-0.5 rounded transition disabled:opacity-50"
+              );
+            }
+            return (
+              <div
+                key={`conf-${e.slot.index}`}
+                className="flex items-center justify-between gap-2 rounded px-2 py-1.5 bg-[var(--ok)]/6 border border-[var(--ok)]/30"
               >
-                Sair da PT
-              </button>
-              )}
-            </div>
+                <span className="text-[11px]">
+                  Você está na {slotLabel}
+                  <span className="text-[var(--ok)]"> · confirmado</span>
+                </span>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => onWithdrawConfirmed(e.slot.index)}
+                  className="text-[10px] border border-[var(--danger)]/40 text-[var(--danger)] hover:bg-[var(--danger)]/10 px-2 py-0.5 rounded transition disabled:opacity-50"
+                >
+                  Sair da PT
+                </button>
+              </div>
             );
           })}
         </div>
@@ -964,7 +1026,9 @@ function SlotApplyMenu({
             >
               Vaga {s.index + 1} ·{" "}
               <span className="text-[var(--warn)] font-semibold">
-                {s.vocation === "ANY" ? "Flex" : s.vocation}
+                {slotVocationLabel(s.vocations) === "Qualquer"
+                  ? "Flex"
+                  : slotVocationLabel(s.vocations)}
               </span>
             </button>
           ))}
@@ -1031,7 +1095,7 @@ function SlotPicker({
         <p className="text-xs text-[var(--text-mute)] mb-3">
           Vocação:{" "}
           <strong className="text-[var(--text)]">
-            {slot.vocation === "ANY" ? "Flex (qualquer)" : slot.vocation}
+            {slotVocationLabel(slot.vocations)}
           </strong>{" "}
           · Mín. level {minLevel} · Servidor {party.server}
         </p>
@@ -1119,230 +1183,356 @@ function SlotPicker({
   );
 }
 
-function HostInvitePicker({
+function SlotManagePopup({
   party,
   slotIndex,
   allPool,
+  charById,
   lockedCharIds,
-  onCancel,
-  onPick,
+  busy,
+  onClose,
+  onAcceptApplication,
+  onDeclineApplication,
+  onInvite,
+  onCancelInvite,
+  onKickConfirmed,
 }: {
   party: PrimalParty;
   slotIndex: number;
   allPool: PrimalPoolEntry[];
+  charById: Map<string, Character>;
   lockedCharIds?: Set<string>;
-  onCancel: () => void;
-  onPick: (entry: PrimalPoolEntry) => void;
+  busy: boolean;
+  onClose: () => void;
+  onAcceptApplication: (charId: string) => void;
+  onDeclineApplication: (charId: string) => void;
+  onInvite: (entry: PrimalPoolEntry) => void;
+  onCancelInvite: (charId: string) => void;
+  onKickConfirmed: () => void;
 }) {
   const slot = party.slots[slotIndex];
-  const [onlyEligible, setOnlyEligible] = useState(false);
+  const overlayProps = useOverlayClose(onClose);
+  const [applicantSearch, setApplicantSearch] = useState("");
+  const [inviteSearch, setInviteSearch] = useState("");
 
-  // Pre-filtra por vocação do slot. Se for ANY, mostra todas as vocs.
-  const vocFiltered = useMemo(
-    () =>
-      allPool
-        .filter((e) => e.vocation && e.characterName)
-        .filter(
-          (e) => slot.vocation === "ANY" || e.vocation === slot.vocation
-        ),
-    [allPool, slot.vocation]
+  const slotVocLabel = slotVocationLabel(slot.vocations);
+
+  const applicants = slot?.applicants ?? [];
+  const invitedCharIds = useMemo(
+    () => new Set((slot?.invites ?? []).map((i) => i.characterId)),
+    [slot]
   );
 
-  const evaluated = useMemo(
-    () =>
-      vocFiltered.map((e) => {
-        // Char preso em outra PT fechada
-        if (lockedCharIds?.has(e.characterId)) {
-          return {
-            entry: e,
-            ok: false as const,
-            reason: "Char travado em outra PT fechada",
-          };
-        }
-        const check = checkCandidateForSlot(
-          {
-            characterId: e.characterId,
-            ownerId: e.ownerId,
-            vocation: e.vocation as Character["vocation"],
-            level: e.level,
-            server: e.server,
-            questDonePrimal: false,
-            hazard: e.hazard,
-            availability: e.availability,
-            hasExperience: e.experience,
-            inPool: true,
-          },
-          party,
-          slotIndex
-        );
-        return { entry: e, ...check };
-      }),
-    [vocFiltered, party, slotIndex, lockedCharIds]
-  );
-
-  // Elegíveis primeiro, depois bloqueados.
-  const sorted = useMemo(() => {
-    const ok = evaluated.filter((x) => x.ok);
-    const blocked = evaluated.filter((x) => !x.ok);
-    return [...ok, ...blocked];
-  }, [evaluated]);
-
-  const [search, setSearch] = useState("");
-  const sortedFiltered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return sorted;
-    return sorted.filter((x) =>
-      x.entry.characterName.toLowerCase().includes(q)
+  const filteredApplicants = useMemo(() => {
+    const q = applicantSearch.trim().toLowerCase();
+    if (!q) return applicants;
+    return applicants.filter((a) =>
+      (a.characterName ?? "").toLowerCase().includes(q)
     );
-  }, [sorted, search]);
-  const visible = onlyEligible
-    ? sortedFiltered.filter((x) => x.ok)
-    : sortedFiltered;
-  const eligibleCount = evaluated.filter((x) => x.ok).length;
-  const blockedCount = evaluated.length - eligibleCount;
-  const overlayProps = useOverlayClose(onCancel);
+  }, [applicants, applicantSearch]);
+
+  // Pool de chars do mesmo servidor (todos, com voc válida), excluindo o host
+  const serverPool = useMemo(
+    () =>
+      allPool.filter(
+        (e) =>
+          e.vocation &&
+          e.characterName &&
+          e.server === party.server &&
+          e.characterId !== party.hostCharacterId
+      ),
+    [allPool, party.server, party.hostCharacterId]
+  );
+
+  type InviteRow = {
+    entry: PrimalPoolEntry;
+    invited: boolean;
+    inviteEntry: ReturnType<typeof getInvite>;
+    disabled: boolean;
+    reason: string | null;
+  };
+  function getInvite(charId: string) {
+    return slot?.invites.find((i) => i.characterId === charId) ?? null;
+  }
+
+  const inviteRows: InviteRow[] = useMemo(() => {
+    return serverPool.map((e) => {
+      const invited = invitedCharIds.has(e.characterId);
+      const inviteEntry = getInvite(e.characterId);
+      let reason: string | null = null;
+      let disabled = false;
+      // Char locked em outra PT fechada
+      if (lockedCharIds?.has(e.characterId)) {
+        reason = "Char travado em outra PT fechada";
+        disabled = true;
+      } else if (
+        !canVocFillSlot(e.vocation as Vocation, slot?.vocations ?? [])
+      ) {
+        reason = `Vocação não compatível (precisa ${slotVocLabel})`;
+        disabled = true;
+      } else if (
+        party.slots.some((s) => s.confirmed?.ownerId === e.ownerId)
+      ) {
+        reason = "Player já tem char nessa PT";
+        disabled = true;
+      } else if (
+        slot?.applicants.some((a) => a.characterId === e.characterId)
+      ) {
+        // tem apply do mesmo char — convite vira auto-confirm
+        reason = "Já se candidatou — clicar Convidar confirma";
+        disabled = false;
+      }
+      return { entry: e, invited, inviteEntry, disabled, reason };
+    });
+  }, [
+    serverPool,
+    invitedCharIds,
+    lockedCharIds,
+    slot,
+    slotVocLabel,
+    party.slots,
+  ]);
+
+  const filteredInviteRows = useMemo(() => {
+    const q = inviteSearch.trim().toLowerCase();
+    if (!q) return inviteRows;
+    return inviteRows.filter((r) =>
+      r.entry.characterName.toLowerCase().includes(q)
+    );
+  }, [inviteRows, inviteSearch]);
+
+  if (!slot) return null;
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65 backdrop-blur-sm"
       {...overlayProps}
     >
-      <div
-        className="w-full max-w-[560px] max-h-[90vh] overflow-y-auto bg-[var(--background-elev)] border border-[var(--border)] rounded-xl p-5 shadow-2xl"
-      >
-        <h3 className="text-sm font-semibold mb-1">
-          Convidar char pra vaga {slotIndex + 1}
-        </h3>
-        <p className="text-xs text-[var(--text-mute)] mb-3">
-          Vocação:{" "}
-          <strong className="text-[var(--text)]">
-            {slot.vocation === "ANY" ? "Flex (qualquer)" : slot.vocation}
-          </strong>{" "}
-          · Servidor {party.server}
-        </p>
-
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="🔍 Buscar char por nome..."
-          className="w-full mb-3 bg-[var(--background)] border border-[var(--border-strong)] rounded-md px-3 py-2 text-sm focus:border-[var(--accent)] focus:outline-none"
-          autoFocus
-        />
-
-        <div className="flex items-center justify-between gap-3 mb-3 bg-[var(--background)] border border-[var(--border-strong)] rounded-lg px-3 py-2">
-          <span className="text-[11px] text-[var(--text-mute)]">
-            {eligibleCount} elegível(eis) ·{" "}
-            <span className="text-[var(--danger)]">
-              {blockedCount} não elegível(eis)
+      <div className="w-full max-w-[560px] max-h-[90vh] overflow-y-auto bg-[var(--background-elev)] border border-[var(--border)] rounded-xl shadow-2xl">
+        {/* Header */}
+        <div className="px-5 py-4 border-b border-[var(--border)] flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <span
+              className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border border-[var(--border-strong)] bg-[var(--background-elev-2)] ${VOC_COLORS[slot.vocations[0] ?? ""] ?? "text-[var(--accent)]"}`}
+            >
+              {slotVocLabel === "Qualquer" ? "Flex" : slotVocLabel}
             </span>
-          </span>
+            <div>
+              <div className="text-sm font-semibold">Vaga {slot.index + 1}</div>
+              <div className="text-[11px] text-[var(--text-mute)]">
+                {slot.confirmed
+                  ? "Vaga preenchida"
+                  : "Gerencie inscrições e envie convites"}
+              </div>
+            </div>
+          </div>
           <button
             type="button"
-            onClick={() => setOnlyEligible((v) => !v)}
-            aria-pressed={onlyEligible}
-            className="flex items-center gap-2 text-[11px] text-[var(--text)]"
+            onClick={onClose}
+            className="text-[var(--text-mute)] hover:text-[var(--text)] text-lg leading-none px-2"
+            aria-label="Fechar"
           >
-            <span>Apenas elegíveis</span>
-            <span
-              className={`relative w-[36px] h-[20px] rounded-full border-[1.5px] transition ${
-                onlyEligible
-                  ? "bg-[var(--accent)]/30 border-[var(--accent)] shadow-[inset_0_0_8px_rgba(96,165,250,0.4)]"
-                  : "bg-[var(--background-elev-2)] border-[var(--border-strong)]"
-              }`}
-            >
-              <span
-                className={`absolute top-[1px] w-[14px] h-[14px] rounded-full transition-all duration-200 ${
-                  onlyEligible
-                    ? "left-[19px] bg-[var(--accent)] shadow-[0_0_6px_rgba(96,165,250,0.7)]"
-                    : "left-[1px] bg-[var(--text-dim)]"
-                }`}
-              />
-            </span>
+            ✕
           </button>
         </div>
 
-        {visible.length === 0 ? (
-          <div className="border border-dashed border-[var(--border-strong)] rounded-lg p-6 text-center text-sm text-[var(--text-mute)]">
-            {onlyEligible
-              ? "Nenhum char elegível pra essa vaga ainda."
-              : `Nenhum char ${slot.vocation === "ANY" ? "" : `${slot.vocation} `}na pool.`}
-          </div>
-        ) : (
-          <div className="space-y-2 mb-4">
-            {visible.map(({ entry, ok, reason }) => {
-              const vocColor =
-                VOC_COLORS[entry.vocation] ?? "text-[var(--accent)]";
-              if (ok) {
-                return (
-                  <button
-                    key={entry.id}
-                    type="button"
-                    onClick={() => onPick(entry)}
-                    className="w-full flex items-center gap-3 p-3 rounded-lg border border-[var(--border-strong)] bg-[var(--background)] hover:border-[var(--accent)] hover:bg-[var(--accent)]/6 text-left transition"
-                  >
-                    <span
-                      className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border border-[var(--border-strong)] bg-[var(--background-elev-2)] ${vocColor}`}
-                    >
-                      {entry.vocation || "?"}
-                    </span>
-                    <span className="flex-1 min-w-0">
-                      <span className="block text-sm font-semibold truncate">
-                        {entry.characterName}
-                      </span>
-                      <span className="block text-[11px] text-[var(--text-mute)]">
-                        Level {entry.level} · Hazard {entry.hazard} ·{" "}
-                        {entry.availability
-                          .map((t) => TURNO_ICONS[t])
-                          .join(" ") || "sem turnos"}
-                      </span>
-                    </span>
-                    <span className="text-[10px] font-semibold text-[var(--ok)] bg-[var(--ok)]/10 border border-[var(--ok)]/40 px-2 py-0.5 rounded-full whitespace-nowrap">
-                      elegível
-                    </span>
-                  </button>
-                );
-              }
-              return (
-                <div
-                  key={entry.id}
-                  className="w-full flex items-center gap-3 p-3 rounded-lg border border-[var(--border-strong)] bg-[var(--background)] opacity-60 cursor-not-allowed"
-                  title={reason}
-                >
-                  <span
-                    className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border border-[var(--border-strong)] bg-[var(--background-elev-2)] ${vocColor}`}
-                  >
-                    {entry.vocation || "?"}
-                  </span>
-                  <span className="flex-1 min-w-0">
-                    <span className="block text-sm font-semibold truncate">
-                      {entry.characterName}
-                    </span>
-                    <span className="block text-[11px] text-[var(--text-mute)]">
-                      Level {entry.level} · Hazard {entry.hazard} ·{" "}
-                      {entry.availability
-                        .map((t) => TURNO_ICONS[t])
-                        .join(" ") || "sem turnos"}
-                    </span>
-                  </span>
-                  <span className="text-[10px] font-semibold text-[var(--danger)] bg-[var(--danger)]/10 border border-[var(--danger)]/30 px-2 py-0.5 rounded-full whitespace-nowrap">
-                    {reason}
-                  </span>
-                </div>
-              );
-            })}
+        {/* Confirmed (read-only com botão de kick) */}
+        {slot.confirmed && (
+          <div className="px-5 py-4 border-b border-[var(--border)] bg-[var(--ok)]/4">
+            <div className="text-[10px] uppercase tracking-wider font-semibold text-[var(--ok)] mb-2">
+              Confirmado nesta vaga
+            </div>
+            <div className="flex items-center justify-between gap-2 bg-[var(--background)] border border-[var(--ok)]/30 rounded px-3 py-2">
+              <span className="text-[12px]">
+                <strong>
+                  {slot.confirmed.vocation} {slot.confirmed.characterName}
+                </strong>{" "}
+                <span className="text-[var(--text-dim)]">
+                  · {slot.confirmed.level}
+                </span>
+              </span>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={onKickConfirmed}
+                className="text-[10px] border border-[var(--danger)]/40 text-[var(--danger)] hover:bg-[var(--danger)]/10 px-2 py-0.5 rounded transition disabled:opacity-50"
+              >
+                Expulsar
+              </button>
+            </div>
           </div>
         )}
 
-        <div className="flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="text-xs border border-[var(--border-strong)] hover:border-[var(--accent-dim)] px-3 py-1.5 rounded transition"
-          >
-            Cancelar
-          </button>
-        </div>
+        {/* Inscritos */}
+        {!slot.confirmed && (
+          <div className="px-5 pt-5 pb-6" style={{ borderBottom: "8px solid var(--background)" }}>
+            <div className="text-[10px] uppercase tracking-wider font-semibold text-[var(--warn)] mb-2">
+              Inscritos{" "}
+              <span className="text-[var(--text-mute)]">
+                · {applicants.length}
+              </span>
+            </div>
+            <input
+              type="text"
+              value={applicantSearch}
+              onChange={(e) => setApplicantSearch(e.target.value)}
+              placeholder="🔍 Buscar inscrito por nome..."
+              className="w-full mb-2 bg-[var(--background)] border border-[var(--border-strong)] rounded-md px-3 py-1.5 text-sm focus:border-[var(--warn)] focus:outline-none"
+            />
+            {applicants.length === 0 ? (
+              <div className="border border-dashed border-[var(--border-strong)] rounded p-4 text-center text-[11px] text-[var(--text-mute)]">
+                Sem inscrições ainda.
+              </div>
+            ) : filteredApplicants.length === 0 ? (
+              <div className="text-[11px] text-[var(--text-mute)] py-2">
+                Nenhum inscrito bate com &quot;{applicantSearch}&quot;.
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                {filteredApplicants.map((a) => {
+                  const live = charById.get(a.characterId);
+                  const name = live?.name ?? a.characterName ?? "removido";
+                  const voc = live?.vocation ?? a.vocation ?? "?";
+                  const level = live?.level ?? a.level ?? "—";
+                  const vocColor =
+                    VOC_COLORS[voc] ?? "text-[var(--accent)]";
+                  return (
+                    <div
+                      key={a.characterId}
+                      className="flex items-center gap-2 bg-[var(--background)] border border-[var(--border-strong)] rounded px-3 py-2"
+                    >
+                      <span
+                        className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border border-[var(--border-strong)] bg-[var(--background-elev-2)] ${vocColor}`}
+                      >
+                        {voc}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[12px] font-semibold truncate">
+                          {name}
+                        </div>
+                        <div className="text-[10px] text-[var(--text-dim)]">
+                          level {level}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => onAcceptApplication(a.characterId)}
+                        className="text-[10px] bg-[var(--ok)] hover:brightness-110 text-[#063817] font-medium px-2 py-1 rounded transition disabled:opacity-50"
+                      >
+                        Aceitar
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => onDeclineApplication(a.characterId)}
+                        className="text-[10px] border border-[var(--danger)]/40 text-[var(--danger)] hover:bg-[var(--danger)]/10 px-2 py-1 rounded transition disabled:opacity-50"
+                      >
+                        Recusar
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Convidar */}
+        {!slot.confirmed && (
+          <div className="px-5 pt-5 pb-5">
+            <div className="text-[10px] uppercase tracking-wider font-semibold text-[var(--accent)] mb-2">
+              Convidar player{" "}
+              <span className="text-[var(--text-mute)]">
+                · servidor {party.server}
+              </span>
+            </div>
+            <input
+              type="text"
+              value={inviteSearch}
+              onChange={(e) => setInviteSearch(e.target.value)}
+              placeholder="🔍 Buscar char por nome..."
+              className="w-full mb-2 bg-[var(--background)] border border-[var(--border-strong)] rounded-md px-3 py-1.5 text-sm focus:border-[var(--accent)] focus:outline-none"
+            />
+            {serverPool.length === 0 ? (
+              <div className="border border-dashed border-[var(--border-strong)] rounded p-4 text-center text-[11px] text-[var(--text-mute)]">
+                Nenhum char registrado na pool do servidor {party.server}.
+              </div>
+            ) : filteredInviteRows.length === 0 ? (
+              <div className="text-[11px] text-[var(--text-mute)] py-2">
+                Nenhum char bate com &quot;{inviteSearch}&quot;.
+              </div>
+            ) : (
+              <div className="space-y-1.5 max-h-[280px] overflow-y-auto pr-1">
+                {filteredInviteRows.map(
+                  ({ entry, invited, inviteEntry, disabled, reason }) => {
+                    const vocColor =
+                      VOC_COLORS[entry.vocation] ?? "text-[var(--accent)]";
+                    return (
+                      <div
+                        key={entry.id}
+                        className={`flex items-center gap-2 bg-[var(--background)] border rounded px-3 py-2 ${
+                          invited
+                            ? "border-[var(--warn)]/40"
+                            : "border-[var(--border-strong)]"
+                        } ${disabled ? "opacity-65" : ""}`}
+                      >
+                        <span
+                          className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border border-[var(--border-strong)] bg-[var(--background-elev-2)] ${vocColor}`}
+                        >
+                          {entry.vocation || "?"}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-[12px] font-semibold truncate">
+                            {entry.characterName}
+                          </div>
+                          <div className="text-[10px] text-[var(--text-dim)] truncate">
+                            level {entry.level}
+                            {reason && (
+                              <span className="text-[var(--danger)]">
+                                {" · "}
+                                {reason}
+                              </span>
+                            )}
+                            {invited && inviteEntry?.expiresAt && (
+                              <span className="text-[var(--warn)]">
+                                {" · "}
+                                convite enviado ·{" "}
+                                <CountdownLabel
+                                  expiresAt={inviteEntry.expiresAt}
+                                />
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        {invited ? (
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => onCancelInvite(entry.characterId)}
+                            className="text-[10px] border border-[var(--danger)]/40 text-[var(--danger)] hover:bg-[var(--danger)]/10 px-2 py-1 rounded transition disabled:opacity-50"
+                          >
+                            Cancelar
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={busy || disabled}
+                            onClick={() => onInvite(entry)}
+                            title={disabled ? reason ?? undefined : "Enviar convite"}
+                            className="text-[10px] bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-[#04122a] font-medium px-2 py-1 rounded transition disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            Convidar
+                          </button>
+                        )}
+                      </div>
+                    );
+                  }
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
