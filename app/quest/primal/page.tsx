@@ -278,7 +278,7 @@ export default function PrimalHubPage() {
               active={tab === "pool"}
               onClick={() => setTab("pool")}
               icon="👥"
-              label="Cadastrar personagens na Pool"
+              label="Add Personagem"
               badge={pool?.length}
             />
             <TabButton
