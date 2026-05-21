@@ -3,12 +3,11 @@
 import { useEffect, useState } from "react";
 import { useOverlayClose } from "./useOverlayClose";
 import { FirebaseError } from "firebase/app";
-import { VOCATIONS } from "@/lib/characters";
+import { VOCATIONS, Vocation } from "@/lib/characters";
 import {
   PartyRequirements,
   PrimalParty,
   PRIMAL_PARTY_MIN_LEVEL,
-  SlotVocation,
   updateParty,
 } from "@/lib/primal-parties";
 import {
@@ -36,7 +35,7 @@ const VOC_COLORS: Record<string, string> = {
   ANY: "text-[var(--text-mute)]",
 };
 
-const SLOT_OPTIONS: SlotVocation[] = ["ANY", ...VOCATIONS];
+const FLEX_VOCS: Vocation[] = [...VOCATIONS];
 
 export function EditPartyModal({ open, party, onClose }: Props) {
   const [notes, setNotes] = useState("");
@@ -47,8 +46,8 @@ export function EditPartyModal({ open, party, onClose }: Props) {
   const [reqScheduleOn, setReqScheduleOn] = useState(false);
   const [reqScheduleTurnos, setReqScheduleTurnos] = useState<Set<Turno>>(new Set());
   const [reqExperiencedOn, setReqExperiencedOn] = useState(false);
-  const [composition, setComposition] = useState<SlotVocation[]>([
-    "EK", "ED", "ANY", "ANY", "ANY",
+  const [composition, setComposition] = useState<Vocation[][]>([
+    ["EK"], ["ED"], [], [], [],
   ]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -63,7 +62,7 @@ export function EditPartyModal({ open, party, onClose }: Props) {
     setReqScheduleOn(party.requirements.schedule.active);
     setReqScheduleTurnos(new Set(party.requirements.schedule.value));
     setReqExperiencedOn(party.requirements.experienced?.active ?? false);
-    setComposition(party.slots.map((s) => s.vocation) as SlotVocation[]);
+    setComposition(party.slots.map((s) => [...s.vocations]));
     setBusy(false);
     setError(null);
   }, [open, party]);
@@ -86,9 +85,20 @@ export function EditPartyModal({ open, party, onClose }: Props) {
     });
   };
 
-  const setSlot = (idx: number, voc: SlotVocation) => {
+  const toggleSlotVoc = (idx: number, voc: Vocation) => {
     if (idx < 2) return;
-    setComposition((prev) => prev.map((v, i) => (i === idx ? voc : v)));
+    setComposition((prev) =>
+      prev.map((vocs, i) => {
+        if (i !== idx) return vocs;
+        return vocs.includes(voc)
+          ? vocs.filter((v) => v !== voc)
+          : [...vocs, voc];
+      })
+    );
+  };
+  const setSlotFlex = (idx: number) => {
+    if (idx < 2) return;
+    setComposition((prev) => prev.map((vocs, i) => (i === idx ? [] : vocs)));
   };
 
   const handleSave = async () => {
@@ -118,7 +128,7 @@ export function EditPartyModal({ open, party, onClose }: Props) {
       await updateParty(party.id, party, {
         notes: notes.trim(),
         requirements,
-        slotComposition: composition.map((v) => (v === "ANY" ? [] : [v])),
+        slotComposition: composition,
       });
       onClose();
     } catch (err) {
@@ -172,18 +182,20 @@ export function EditPartyModal({ open, party, onClose }: Props) {
               alteradas.
             </p>
             <div className="grid grid-cols-5 gap-2">
-              {composition.map((voc, i) => {
+              {composition.map((vocs, i) => {
                 const locked = i < 2;
+                const isFlex = vocs.length === 0;
+                const lockedVoc = vocs[0];
                 return (
                   <div
                     key={i}
-                    className={`p-2.5 rounded-md border text-center ${
+                    className={`p-2 rounded-md border ${
                       locked
                         ? "border-[var(--border)] bg-[var(--background-elev-2)]"
                         : "border-[var(--border-strong)] bg-[var(--background)]"
                     }`}
                   >
-                    <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-mute)] mb-1">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-mute)] mb-1.5 text-center">
                       Vaga {i + 1}
                       {locked && (
                         <span className="ml-1 text-[var(--text-dim)]">🔒</span>
@@ -191,27 +203,51 @@ export function EditPartyModal({ open, party, onClose }: Props) {
                     </div>
                     {locked ? (
                       <div
-                        className={`bg-[var(--background)] border border-[var(--border)] rounded px-1.5 py-1 text-[12px] font-bold ${VOC_COLORS[voc] ?? ""}`}
+                        className={`bg-[var(--background)] border border-[var(--border)] rounded px-1.5 py-1 text-[12px] font-bold text-center ${VOC_COLORS[lockedVoc] ?? ""}`}
                       >
-                        {voc}
+                        {lockedVoc}
                       </div>
                     ) : (
-                      <select
-                        value={voc}
-                        onChange={(e) => setSlot(i, e.target.value as SlotVocation)}
-                        className={`w-full bg-[var(--background-elev-2)] border border-[var(--border)] rounded px-1.5 py-1 text-[12px] font-semibold outline-none focus:border-[var(--accent)] ${VOC_COLORS[voc] ?? ""}`}
-                      >
-                        {SLOT_OPTIONS.map((o) => (
-                          <option key={o} value={o} className="text-[var(--text)]">
-                            {o === "ANY" ? "Flex" : o}
-                          </option>
-                        ))}
-                      </select>
+                      <div className="flex flex-wrap gap-1 justify-center">
+                        {FLEX_VOCS.map((v) => {
+                          const on = vocs.includes(v);
+                          return (
+                            <button
+                              key={v}
+                              type="button"
+                              onClick={() => toggleSlotVoc(i, v)}
+                              className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded border transition ${
+                                on
+                                  ? `border-[var(--accent)] bg-[var(--accent)]/15 ${VOC_COLORS[v] ?? "text-[var(--accent)]"}`
+                                  : "border-[var(--border)] bg-[var(--background-elev-2)] text-[var(--text-dim)] hover:text-[var(--text)]"
+                              }`}
+                            >
+                              {v}
+                            </button>
+                          );
+                        })}
+                        <button
+                          type="button"
+                          onClick={() => setSlotFlex(i)}
+                          className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded border transition w-full ${
+                            isFlex
+                              ? "border-[var(--accent)] bg-[var(--accent)]/15 text-[var(--accent)]"
+                              : "border-[var(--border)] bg-[var(--background-elev-2)] text-[var(--text-dim)] hover:text-[var(--text)]"
+                          }`}
+                        >
+                          Flex
+                        </button>
+                      </div>
                     )}
                   </div>
                 );
               })}
             </div>
+            {composition.some((vocs, i) => i >= 2 && vocs.length > 1) && (
+              <p className="text-[11px] text-[var(--text-mute)] mt-2">
+                💡 Vagas com mais de uma vocação aceitam <strong>qualquer um</strong> dos chips marcados.
+              </p>
+            )}
           </section>
 
           {/* Requirements */}
