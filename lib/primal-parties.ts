@@ -866,7 +866,7 @@ export async function completeParty(partyId: string, party?: PrimalParty) {
         new Set(
           party.slots
             .map((s) => s.confirmed?.characterId)
-            .filter((id): id is string => !!id)
+            .filter((id): id is string => !!id && !id.startsWith("dummy_"))
         )
       )
     : [];
