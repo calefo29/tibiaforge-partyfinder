@@ -100,6 +100,22 @@ export function PartyCard({
     }
   };
 
+  // Tint progressivo: enche da esquerda pra direita conforme confirmados,
+  // cor interpolada de azul (0/N) a verde (N/N). Mesmo padrão da Sugestão Auto.
+  const progressBg = (() => {
+    if (isCancelled || isCompleted) return undefined;
+    const total = party.slots.length;
+    if (total === 0) return undefined;
+    const ratio = confirmedCount / total;
+    const pct = Math.min(100, Math.max(0, ratio * 100));
+    const r = Math.round(120 + (74 - 120) * ratio);
+    const g = Math.round(180 + (222 - 180) * ratio);
+    const b = Math.round(250 + (94 - 250) * ratio);
+    const alpha = 0.05;
+    const tone = `rgba(${r},${g},${b},${alpha})`;
+    return `linear-gradient(90deg, ${tone} 0%, ${tone} ${pct}%, transparent ${pct}%)`;
+  })();
+
   return (
     <div
       className={`bg-[var(--background-elev)] border rounded-xl p-4 transition ${
@@ -109,6 +125,7 @@ export function PartyCard({
             ? "border-[var(--border)] opacity-60"
             : "border-[var(--border)] hover:border-[var(--accent-dim)]"
       }`}
+      style={progressBg ? { backgroundImage: progressBg } : undefined}
     >
       <div className="flex items-start justify-between gap-3 mb-3 flex-wrap">
         <div className="min-w-0">
@@ -136,28 +153,39 @@ export function PartyCard({
               hostSlotEntry?.level ??
               poolHost?.level ??
               null;
+            const hostInitial = (hostName ?? "?").charAt(0).toUpperCase();
             return (
-              <div className="text-xs text-[var(--text-mute)]">
-                Host:{" "}
-                {hostName ? (
-                  <>
-                    {hostVoc && (
-                      <>
-                        <span
-                          className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border border-[var(--border-strong)] bg-[var(--background-elev-2)] ${VOC_COLORS[hostVoc] ?? ""}`}
-                        >
-                          {hostVoc}
-                        </span>{" "}
-                      </>
-                    )}
-                    <strong className="text-[var(--text)]">{hostName}</strong>
-                    {hostLvl != null && (
-                      <span className="text-[var(--text-dim)]"> · {hostLvl}</span>
-                    )}
-                  </>
-                ) : (
-                  <em>char removido</em>
+              <div className="flex items-center gap-2.5">
+                {hostName && (
+                  <div
+                    className={`w-9 h-9 shrink-0 rounded-full flex items-center justify-center font-bold text-[15px] border border-[var(--accent-dim)] bg-[var(--accent)]/15 ${VOC_COLORS[hostVoc ?? ""] ?? "text-[var(--accent)]"}`}
+                    title="Host"
+                  >
+                    {hostInitial}
+                  </div>
                 )}
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5 mb-0.5">
+                    <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-[var(--accent)] text-[#04122a]">
+                      HOST
+                    </span>
+                  </div>
+                  {hostName ? (
+                    <div className="text-[15px] font-semibold leading-tight">
+                      PT do{" "}
+                      <span className="text-[var(--accent)]">{hostName}</span>
+                      {(hostVoc || hostLvl != null) && (
+                        <span className="text-[var(--text-mute)] font-normal text-[13px]">
+                          {" "}
+                          ({hostVoc ?? "?"}
+                          {hostLvl != null ? ` ${hostLvl}` : ""})
+                        </span>
+                      )}
+                    </div>
+                  ) : (
+                    <em className="text-xs text-[var(--text-mute)]">char removido</em>
+                  )}
+                </div>
               </div>
             );
           })()}
@@ -398,7 +426,7 @@ export function PartyCard({
                 type="button"
                 disabled={busy}
                 onClick={() =>
-                  handleAction(() => completeParty(party.id))
+                  handleAction(() => completeParty(party.id, party))
                 }
                 className="text-xs bg-[var(--ok)] hover:brightness-110 text-[#063817] font-semibold px-3 py-1.5 rounded transition disabled:opacity-50"
               >
