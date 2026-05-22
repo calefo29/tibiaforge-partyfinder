@@ -23,11 +23,14 @@ import {
   MatchablePool,
 } from "@/lib/primal-matching";
 import {
+  acceptSuggestion,
   currentCycleDate,
   nextServerSave,
+  SuggestionSlot,
   SuggestionStatus,
 } from "@/lib/primal-suggestions";
 import { createNotificationsBulk } from "@/lib/notifications";
+import { useAuth } from "@/lib/auth-context";
 
 const FAKE_NAMES = [
   "Carlos", "Maria", "Jose", "Alfredo", "Thiago", "Soxi", "Rafael", "Pedro",
@@ -57,6 +60,7 @@ type LastRun = {
 };
 
 export function DevSuggestionTools() {
+  const { user } = useAuth();
   const [busy, setBusy] = useState<string | null>(null);
   const [log, setLog] = useState<string[]>([]);
   const [lastRun, setLastRun] = useState<LastRun | null>(null);
@@ -299,6 +303,242 @@ export function DevSuggestionTools() {
     }
   };
 
+  // Força uma sugestão pendente que GARANTIDAMENTE inclui um char do admin,
+  // preenchendo as outras 4 vagas com chars (dummies preferidos) que satisfaçam
+  // a composição (1 EK, 1-2 ED, ≥1 RP, ≤1 EM).
+  const handleForceSuggestionForMe = async () => {
+    if (!user) {
+      append("❌ Usuário não autenticado");
+      return;
+    }
+    setBusy("force-mine");
+    try {
+      // 1. Lê chars do admin na pool
+      const myPoolSnap = await getDocs(
+        query(
+          collection(db, "primalPool"),
+          where("ownerId", "==", user.uid),
+          where("status", "==", "active")
+        )
+      );
+      if (myPoolSnap.empty) {
+        append("❌ Você não tem chars na pool ativa. Cadastra na aba 'Add Personagem' primeiro.");
+        return;
+      }
+      const myEntries: PrimalPoolEntry[] = myPoolSnap.docs.map((d) => mapEntry(d));
+      const myEntry = myEntries[0];
+
+      // 2. Lê outros chars do mesmo server
+      const allSnap = await getDocs(
+        query(
+          collection(db, "primalPool"),
+          where("status", "==", "active"),
+          where("server", "==", myEntry.server)
+        )
+      );
+      const others: PrimalPoolEntry[] = allSnap.docs
+        .map((d) => mapEntry(d))
+        .filter((e) => e.characterId !== myEntry.characterId);
+
+      // 3. Greedy: preenche pra satisfazer composição
+      const counts: Record<string, number> = {
+        EK: 0,
+        ED: 0,
+        RP: 0,
+        MS: 0,
+        EM: 0,
+      };
+      counts[myEntry.vocation as Vocation]++;
+      const chosen: PrimalPoolEntry[] = [myEntry];
+      const usedIds = new Set([myEntry.characterId]);
+      const usedOwners = new Set([myEntry.ownerId]);
+
+      // Helper pra escolher por voc respeitando limites
+      const pickByVoc = (voc: Vocation): PrimalPoolEntry | null => {
+        return (
+          others.find(
+            (e) =>
+              e.vocation === voc &&
+              !usedIds.has(e.characterId) &&
+              !usedOwners.has(e.ownerId)
+          ) ?? null
+        );
+      };
+
+      // Primeiro, preenche necessidades mínimas: 1 EK, 1 ED, 1 RP
+      const required: Vocation[] = [];
+      if (counts.EK < 1) required.push("EK");
+      if (counts.ED < 1) required.push("ED");
+      if (counts.RP < 1) required.push("RP");
+
+      for (const voc of required) {
+        const pick = pickByVoc(voc);
+        if (!pick) {
+          append(
+            `❌ Sem ${voc} disponível no server ${myEntry.server}. Roda "Seed pool" antes ou cadastra mais chars.`
+          );
+          return;
+        }
+        chosen.push(pick);
+        usedIds.add(pick.characterId);
+        usedOwners.add(pick.ownerId);
+        counts[voc]++;
+      }
+
+      // Depois, completa até 5 com qualquer voc respeitando limites
+      while (chosen.length < 5) {
+        const pick = others.find((e) => {
+          if (usedIds.has(e.characterId)) return false;
+          if (usedOwners.has(e.ownerId)) return false;
+          const v = e.vocation;
+          if (v === "EK" && counts.EK >= 1) return false;
+          if (v === "ED" && counts.ED >= 2) return false;
+          if (v === "EM" && counts.EM >= 1) return false;
+          return true;
+        });
+        if (!pick) {
+          append(
+            `❌ Pool insuficiente no server ${myEntry.server} pra completar a PT. Roda "Seed pool" antes.`
+          );
+          return;
+        }
+        chosen.push(pick);
+        usedIds.add(pick.characterId);
+        usedOwners.add(pick.ownerId);
+        counts[pick.vocation as Vocation]++;
+      }
+
+      // 4. Monta SuggestionSlot[]
+      const slots: SuggestionSlot[] = chosen.map((e, i) => ({
+        index: i,
+        characterId: e.characterId,
+        ownerId: e.ownerId,
+        characterName: e.characterName,
+        vocation: e.vocation as Vocation,
+        level: e.level,
+        hasExperience: e.experience ?? false,
+        availability: e.availability ?? [],
+      }));
+
+      // Turnos em comum (intersecção)
+      const allTurnos = slots.map((s) => new Set(s.availability));
+      const commonTurns: Turno[] = (
+        ["manha", "tarde", "noite", "madrugada"] as Turno[]
+      ).filter((t) => allTurnos.every((set) => set.has(t)));
+
+      const levelAvg = Math.round(
+        slots.reduce((acc, s) => acc + s.level, 0) / slots.length
+      );
+      const experiencedCount = slots.filter((s) => s.hasExperience).length;
+
+      const cycleDate = currentCycleDate();
+      const expiresAt = nextServerSave();
+
+      const ref = await addDoc(collection(db, "primalSuggestions"), {
+        cycleDate,
+        server: myEntry.server,
+        slots,
+        acceptedBy: [],
+        declinedBy: null,
+        status: "pending" as SuggestionStatus,
+        commonTurns,
+        levelAvg,
+        experiencedCount,
+        createdAt: serverTimestamp(),
+        expiresAt: Timestamp.fromDate(expiresAt),
+      });
+
+      // Notifica os players reais (não-dummies)
+      const ownerIds = slots
+        .map((s) => s.ownerId)
+        .filter(
+          (uid): uid is string => !!uid && !uid.startsWith("dummy_")
+        );
+      if (ownerIds.length > 0) {
+        await createNotificationsBulk(ownerIds, {
+          type: "suggestion_new",
+          title: "PT aleatória formada!",
+          body: `Você foi sorteado pra uma PT no ${myEntry.server}.`,
+          link: "/quest/primal",
+          meta: { suggestionId: ref.id, server: myEntry.server },
+        });
+      }
+
+      append(
+        `🎯 Sugestão forçada pro ${myEntry.characterName} (${myEntry.vocation}): ${slots
+          .map((s) => `${s.vocation} ${s.characterName}`)
+          .join(", ")}`
+      );
+    } catch (e) {
+      append(
+        `❌ Erro force: ${e instanceof Error ? e.message : String(e)}`
+      );
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  // Simula os outros 4 players da sugestão pendente aceitando — se completar 5/5
+  // dispara a promoção pra PrimalParty closed.
+  const handleAcceptByOthers = async () => {
+    if (!user) {
+      append("❌ Usuário não autenticado");
+      return;
+    }
+    setBusy("accept-others");
+    try {
+      // Acha sugestões pending com algum char do admin
+      const snap = await getDocs(
+        query(
+          collection(db, "primalSuggestions"),
+          where("status", "==", "pending")
+        )
+      );
+      const mineSugs = snap.docs.filter((d) => {
+        const slots = (d.data().slots ?? []) as Array<{ ownerId?: string }>;
+        return slots.some((s) => s.ownerId === user.uid);
+      });
+      if (mineSugs.length === 0) {
+        append(
+          "❌ Você não está em nenhuma sugestão pending. Clica em 'Sortear PT com meu char' primeiro."
+        );
+        return;
+      }
+      let totalAccepted = 0;
+      let promotedCount = 0;
+      for (const d of mineSugs) {
+        const data = d.data();
+        const slots = (data.slots ?? []) as SuggestionSlot[];
+        const acceptedBy: string[] = (data.acceptedBy ?? []) as string[];
+
+        // Filtra outros chars (não do admin) que ainda não aceitaram
+        const toAccept = slots.filter(
+          (s) =>
+            s.ownerId !== user.uid && !acceptedBy.includes(s.characterId)
+        );
+
+        for (const slot of toAccept) {
+          const result = await acceptSuggestion(d.id, slot.characterId);
+          if (result.ok) {
+            totalAccepted++;
+            if (result.promoted) promotedCount++;
+          }
+        }
+      }
+      append(
+        `✅ ${totalAccepted} aceites simulados${
+          promotedCount > 0 ? ` · ${promotedCount} PT(s) promovida(s) pra closed` : ""
+        }`
+      );
+    } catch (e) {
+      append(
+        `❌ Erro accept-others: ${e instanceof Error ? e.message : String(e)}`
+      );
+    } finally {
+      setBusy(null);
+    }
+  };
+
   return (
     <div className="mb-5 bg-[var(--warn)]/8 border border-dashed border-[var(--warn)]/40 rounded-xl p-3">
       <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
@@ -369,6 +609,28 @@ export function DevSuggestionTools() {
             ? "Sorteando…"
             : "🔁 Simular fim de prazo + sortear novamente"}
         </button>
+        <button
+          type="button"
+          disabled={!!busy}
+          onClick={handleForceSuggestionForMe}
+          className="text-xs border border-[var(--ok)]/50 text-[var(--ok)] hover:bg-[var(--ok)]/15 px-3 py-1.5 rounded transition disabled:opacity-50"
+          title="Cria uma sugestão garantindo que seu char (1º da pool) esteja nela, com 4 chars compatíveis no mesmo server"
+        >
+          {busy === "force-mine"
+            ? "Sorteando…"
+            : "🎯 Sortear PT com meu char"}
+        </button>
+        <button
+          type="button"
+          disabled={!!busy}
+          onClick={handleAcceptByOthers}
+          className="text-xs border border-[#a78bfa]/60 text-[#a78bfa] hover:bg-[#a78bfa]/15 px-3 py-1.5 rounded transition disabled:opacity-50"
+          title="Para cada sugestão pending onde você está, simula que os outros 4 players aceitaram (testa promoção pra PT closed)"
+        >
+          {busy === "accept-others"
+            ? "Aceitando…"
+            : "✅ Aceitar pelos demais (fechar PT)"}
+        </button>
       </div>
       {log.length > 0 && (
         <div className="mt-3 pt-2 border-t border-[var(--warn)]/20 space-y-1">
@@ -384,6 +646,27 @@ export function DevSuggestionTools() {
       )}
     </div>
   );
+}
+
+function mapEntry(
+  d: import("firebase/firestore").QueryDocumentSnapshot
+): PrimalPoolEntry {
+  const data = d.data();
+  return {
+    id: d.id,
+    ownerId: data.ownerId,
+    characterId: data.characterId,
+    experience: data.experience ?? false,
+    hazard: data.hazard ?? 0,
+    availability: (data.availability ?? []) as Turno[],
+    status: data.status ?? "active",
+    registeredAt: data.registeredAt ?? null,
+    updatedAt: data.updatedAt ?? null,
+    characterName: data.characterName ?? "",
+    vocation: data.vocation ?? "",
+    level: data.level ?? 0,
+    server: data.server ?? "",
+  };
 }
 
 function formatLastRun(ts: Timestamp | null): string {
