@@ -97,38 +97,45 @@ export function DevSuggestionTools() {
     try {
       const now = new Date();
       const stamp = now.getTime();
-      const plan = [
-        { server: "Auroria", count: 18 },
-        { server: "Halorian", count: 10 },
-      ];
+      // 30 dummies todos no Auroria · exatamente 6 de cada voc (EK/ED/MS/RP/EM).
+      // Garante que toda PT da Auroria consegue ser formada (algoritmo precisa
+      // de 1 EK + 1-2 ED + ≥1 RP + ≤1 EM + 5 chars).
+      const server = "Auroria";
+      const vocsPlan: Vocation[] = [];
+      (["EK", "ED", "RP", "MS", "EM"] as Vocation[]).forEach((v) => {
+        for (let i = 0; i < 6; i++) vocsPlan.push(v);
+      });
+      // Embaralha pra que os turnos/levels não fiquem agrupados por voc
+      vocsPlan.sort(() => Math.random() - 0.5);
+
       let created = 0;
-      for (const { server, count } of plan) {
-        for (let i = 0; i < count; i++) {
-          const voc: Vocation = i === 0 ? "EK" : i === 1 ? "ED" : i === 2 ? "EK" : i === 3 ? "ED" : pickRandom(VOCS);
-          const name = `${pickRandom(FAKE_NAMES)} ${pickRandom(SUFFIXES)} ${i + 1}`;
-          const level = 600 + Math.floor(Math.random() * 500);
-          const ownerId = `__dummy_${stamp}_${server}_${i}`;
-          const characterId = `__dummy_char_${stamp}_${server}_${i}`;
-          const past = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-          await addDoc(collection(db, "primalPool"), {
-            ownerId,
-            characterId,
-            experience: Math.random() < 0.4,
-            hazard: Math.floor(Math.random() * 12),
-            availability: rollTurnos(),
-            status: "active",
-            registeredAt: Timestamp.fromDate(past),
-            updatedAt: serverTimestamp(),
-            characterName: name,
-            vocation: voc,
-            level,
-            server,
-            __dummy: true,
-          });
-          created++;
-        }
+      for (let i = 0; i < vocsPlan.length; i++) {
+        const voc = vocsPlan[i];
+        const name = `${pickRandom(FAKE_NAMES)} ${pickRandom(SUFFIXES)} ${i + 1}`;
+        const level = 600 + Math.floor(Math.random() * 500);
+        const ownerId = `__dummy_${stamp}_${server}_${i}`;
+        const characterId = `__dummy_char_${stamp}_${server}_${i}`;
+        const past = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+        await addDoc(collection(db, "primalPool"), {
+          ownerId,
+          characterId,
+          experience: Math.random() < 0.4,
+          hazard: Math.floor(Math.random() * 12),
+          availability: rollTurnos(),
+          status: "active",
+          registeredAt: Timestamp.fromDate(past),
+          updatedAt: serverTimestamp(),
+          characterName: name,
+          vocation: voc,
+          level,
+          server,
+          __dummy: true,
+        });
+        created++;
       }
-      append(`🌱 Seedados ${created} dummies (Auroria + Halorian)`);
+      append(
+        `🌱 Seedados ${created} dummies em ${server} (6 EK · 6 ED · 6 RP · 6 MS · 6 EM)`
+      );
     } catch (e) {
       append(`❌ Erro seed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
@@ -588,7 +595,7 @@ export function DevSuggestionTools() {
           onClick={handleSeed}
           className="text-xs border border-[var(--warn)]/50 text-[var(--warn)] hover:bg-[var(--warn)]/15 px-3 py-1.5 rounded transition disabled:opacity-50"
         >
-          {busy === "seed" ? "Seedando…" : "🌱 Seed pool (28 dummies)"}
+          {busy === "seed" ? "Seedando…" : "🌱 Seed pool (30 dummies · Auroria)"}
         </button>
         <button
           type="button"
