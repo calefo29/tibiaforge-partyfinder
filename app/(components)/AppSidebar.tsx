@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { Brand } from "./Brand";
+import { NotificationBell } from "./NotificationBell";
 
 type Props = {
   /** Quando true, renderiza como drawer overlay (mobile). */
@@ -56,15 +57,21 @@ export function AppSidebar({ mobileOpen = false, onClose }: Props) {
       >
         <div className="px-5 py-5 border-b border-[var(--border)] flex items-center justify-between gap-2">
           <Brand />
-          {/* Botão X só aparece no mobile */}
-          <button
-            type="button"
-            onClick={onClose}
-            className="md:hidden text-[var(--text-mute)] hover:text-[var(--text)] text-xl leading-none px-2"
-            aria-label="Fechar menu"
-          >
-            ✕
-          </button>
+          <div className="flex items-center gap-1">
+            {/* Sininho só visível no desktop (no mobile fica na topbar) */}
+            <div className="hidden md:block">
+              <NotificationBell />
+            </div>
+            {/* Botão X só aparece no mobile */}
+            <button
+              type="button"
+              onClick={onClose}
+              className="md:hidden text-[var(--text-mute)] hover:text-[var(--text)] text-xl leading-none px-2"
+              aria-label="Fechar menu"
+            >
+              ✕
+            </button>
+          </div>
         </div>
 
         <div className="px-4 py-4">
