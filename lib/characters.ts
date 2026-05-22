@@ -3,6 +3,8 @@ import {
   collection,
   deleteDoc,
   doc,
+  getDoc,
+  getDocs,
   onSnapshot,
   orderBy,
   query,
@@ -74,7 +76,15 @@ export async function addCharacter(ownerId: string, input: CharacterInput) {
 }
 
 export async function updateCharacter(id: string, input: CharacterInput) {
-  await updateDoc(doc(db, "characters", id), {
+  // Lê estado anterior pra detectar mudança em questHistory.primal
+  // e sincronizar com a pool (player tem autonomia pra reverter "já fiz").
+  const ref = doc(db, "characters", id);
+  const before = await getDoc(ref);
+  const beforeData = before.exists() ? before.data() : null;
+  const oldPrimal = beforeData?.questHistory?.primal === true;
+  const newPrimal = input.questHistory.primal === true;
+
+  await updateDoc(ref, {
     name: input.name.trim(),
     vocation: input.vocation,
     level: input.level,
@@ -82,6 +92,25 @@ export async function updateCharacter(id: string, input: CharacterInput) {
     questHistory: input.questHistory,
     updatedAt: serverTimestamp(),
   });
+
+  // Se mudou o status de "já fez Primal", sincroniza pool entries do char:
+  // - false → true: inativa (não precisa mais matchmaking)
+  // - true → false: reativa (player desmarcou, talvez por erro do host)
+  if (oldPrimal !== newPrimal) {
+    try {
+      const poolSnap = await getDocs(
+        query(collection(db, "primalPool"), where("characterId", "==", id))
+      );
+      for (const d of poolSnap.docs) {
+        await updateDoc(d.ref, {
+          status: newPrimal ? "inactive" : "active",
+          updatedAt: serverTimestamp(),
+        });
+      }
+    } catch (err) {
+      console.error("Falhou ao sincronizar pool após mudar questHistory:", err);
+    }
+  }
 }
 
 export async function deleteCharacter(id: string) {
