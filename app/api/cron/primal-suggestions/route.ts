@@ -2,9 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   addDoc,
   collection,
+  doc,
   getDocs,
   query,
   serverTimestamp,
+  setDoc,
   Timestamp,
   updateDoc,
   where,
@@ -158,6 +160,23 @@ export async function GET(req: NextRequest) {
   }
 
   const created = createdSuggestions.reduce((acc, x) => acc + x.count, 0);
+
+  // Tracking: registra última execução automática
+  try {
+    await setDoc(doc(db, "adminMetrics", "lastCronRun"), {
+      cycleDate,
+      ranAt: serverTimestamp(),
+      trigger: "auto",
+      expiredCount,
+      poolSize: allPool.length,
+      eligibleSize: eligible.length,
+      lockedCount: lockedCharIds.size,
+      created,
+      byServer: createdSuggestions,
+    });
+  } catch (err) {
+    console.error("Falhou ao escrever adminMetrics/lastCronRun:", err);
+  }
 
   return NextResponse.json({
     ok: true,

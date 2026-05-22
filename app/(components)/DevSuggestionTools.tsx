@@ -1,12 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   addDoc,
   collection,
+  doc,
   getDocs,
+  onSnapshot,
   query,
   serverTimestamp,
+  setDoc,
   Timestamp,
   where,
   writeBatch,
@@ -44,12 +47,46 @@ function rollTurnos(): Turno[] {
   return shuffled.slice(0, count);
 }
 
+type LastRun = {
+  ranAt: Timestamp | null;
+  trigger: "auto" | "manual";
+  expiredCount: number;
+  created: number;
+  poolSize?: number;
+  eligibleSize?: number;
+};
+
 export function DevSuggestionTools() {
   const [busy, setBusy] = useState<string | null>(null);
   const [log, setLog] = useState<string[]>([]);
+  const [lastRun, setLastRun] = useState<LastRun | null>(null);
 
   const append = (msg: string) =>
     setLog((l) => [`${new Date().toLocaleTimeString()} — ${msg}`, ...l].slice(0, 8));
+
+  // Subscribe à última execução do cron pra exibir no UI
+  useEffect(() => {
+    const unsub = onSnapshot(
+      doc(db, "adminMetrics", "lastCronRun"),
+      (snap) => {
+        if (!snap.exists()) {
+          setLastRun(null);
+          return;
+        }
+        const d = snap.data();
+        setLastRun({
+          ranAt: d.ranAt ?? null,
+          trigger: (d.trigger ?? "auto") as "auto" | "manual",
+          expiredCount: d.expiredCount ?? 0,
+          created: d.created ?? 0,
+          poolSize: d.poolSize,
+          eligibleSize: d.eligibleSize,
+        });
+      },
+      () => setLastRun(null)
+    );
+    return () => unsub();
+  }, []);
 
   const handleSeed = async () => {
     setBusy("seed");
@@ -234,6 +271,22 @@ export function DevSuggestionTools() {
         }
         if (parts.length > 0) summary.push(`${server}: ${parts.length} PT(s)`);
       }
+      // Tracking: registra essa execução manual em adminMetrics/lastCronRun
+      try {
+        await setDoc(doc(db, "adminMetrics", "lastCronRun"), {
+          cycleDate,
+          ranAt: serverTimestamp(),
+          trigger: "manual",
+          expiredCount: oldSnap.size,
+          poolSize: allPool.length,
+          eligibleSize: eligible.length,
+          created,
+          notified,
+        });
+      } catch {
+        // não-crítico
+      }
+
       append(
         `🔁 Ciclo simulado: ${oldSnap.size} expiradas → ${created} novas sugestões · ${notified} players notificados${
           summary.length ? " (" + summary.join(", ") + ")" : ""
@@ -260,6 +313,33 @@ export function DevSuggestionTools() {
         ⚙️ <strong className="text-[var(--text)]">Auto:</strong> todo dia às 10h BRT (13h UTC), o cron expira sugestões pendentes e sorteia novas pra cada char na pool.
         <br />
         🔁 <strong className="text-[var(--text)]">Manual:</strong> use o botão abaixo pra simular esse processo agora — útil pra testar sem esperar o próximo ciclo.
+      </div>
+
+      <div className="text-[11px] mb-2 px-2 py-1.5 rounded border border-[var(--border)] bg-[var(--background)]/60">
+        <span className="text-[var(--text-mute)]">Última execução:</span>{" "}
+        {lastRun ? (
+          <>
+            <strong
+              className={
+                lastRun.trigger === "auto"
+                  ? "text-[var(--ok)]"
+                  : "text-[var(--accent)]"
+              }
+            >
+              {lastRun.trigger === "auto" ? "🟢 AUTO" : "🟦 MANUAL"}
+            </strong>{" "}
+            <span className="text-[var(--text)]">{formatLastRun(lastRun.ranAt)}</span>{" "}
+            <span className="text-[var(--text-dim)]">
+              · {lastRun.expiredCount} expiradas → {lastRun.created} novas
+              {typeof lastRun.eligibleSize === "number" &&
+                ` · pool ${lastRun.eligibleSize}`}
+            </span>
+          </>
+        ) : (
+          <em className="text-[var(--text-dim)]">
+            sem registros (cron auto ainda não rodou)
+          </em>
+        )}
       </div>
       <div className="flex flex-wrap gap-2">
         <button
@@ -304,4 +384,19 @@ export function DevSuggestionTools() {
       )}
     </div>
   );
+}
+
+function formatLastRun(ts: Timestamp | null): string {
+  if (!ts || !ts.toMillis) return "—";
+  const ms = ts.toMillis();
+  const diff = Date.now() - ms;
+  const sec = Math.floor(diff / 1000);
+  if (sec < 60) return "agora mesmo";
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `há ${min} min`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `há ${hr}h`;
+  const d = Math.floor(hr / 24);
+  if (d < 7) return `há ${d}d`;
+  return new Date(ms).toLocaleString("pt-BR");
 }

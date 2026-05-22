@@ -1,5 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { collection, getDocs, query, where } from "firebase/firestore";
+import {
+  collection,
+  doc,
+  getDocs,
+  query,
+  serverTimestamp,
+  setDoc,
+  where,
+} from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { createNotificationsBulk } from "@/lib/notifications";
 
@@ -61,6 +69,18 @@ export async function GET(req: NextRequest) {
 
     totalNotified += pendingOwners.length;
     perSuggestion.push({ id: d.id, notified: pendingOwners.length });
+  }
+
+  // Tracking
+  try {
+    await setDoc(doc(db, "adminMetrics", "lastReminderRun"), {
+      ranAt: serverTimestamp(),
+      suggestionsChecked: snap.size,
+      totalNotified,
+      perSuggestion,
+    });
+  } catch (err) {
+    console.error("Falhou ao escrever adminMetrics/lastReminderRun:", err);
   }
 
   return NextResponse.json({
