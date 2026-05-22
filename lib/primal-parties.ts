@@ -88,6 +88,13 @@ export const DEFAULT_REQUIREMENTS: PartyRequirements = {
   questDone: { active: false, value: false },
 };
 
+/**
+ * Origem da PT — influencia como ela se comporta ao ser "ressuscitada" via
+ * leaveClosedParty (player desistir de PT já fechada). PTs do sistema aleatório
+ * têm requirements resetadas pro mínimo, manuais mantêm o que o host configurou.
+ */
+export type PartyOrigin = "manual" | "suggestion";
+
 export type PrimalParty = {
   id: string;
   hostUid: string;
@@ -98,6 +105,8 @@ export type PrimalParty = {
   server: string;
   notes: string;
   requirements: PartyRequirements;
+  /** Default "manual" pra PTs antigas sem o campo. */
+  origin: PartyOrigin;
   status: PartyStatus;
   slots: Slot[];
   createdAt: Timestamp | null;
@@ -204,6 +213,7 @@ export async function createParty(input: CreatePartyInput) {
     server: input.server,
     notes: input.notes,
     requirements: input.requirements,
+    origin: "manual" as PartyOrigin,
     status: "forming" as PartyStatus,
     slots: slots.map(serializeSlot),
     createdAt: serverTimestamp(),
@@ -459,6 +469,8 @@ function mapParty(d: import("firebase/firestore").QueryDocumentSnapshot): Primal
     experienced: rawReq?.experienced ?? { active: false },
     questDone: rawReq?.questDone ?? { active: false, value: false },
   };
+  const origin: PartyOrigin =
+    data.origin === "suggestion" ? "suggestion" : "manual";
   return {
     id: d.id,
     hostUid: String(data.hostUid ?? ""),
@@ -476,6 +488,7 @@ function mapParty(d: import("firebase/firestore").QueryDocumentSnapshot): Primal
     server: String(data.server ?? ""),
     notes: String(data.notes ?? ""),
     requirements,
+    origin,
     status: (data.status as PartyStatus) ?? "forming",
     slots,
     createdAt: (data.createdAt as Timestamp) ?? null,
@@ -1039,12 +1052,28 @@ export async function leaveClosedParty(
     party.slots.find((s) => s.index === slotIndex) ?? party.slots[slotIndex];
   if (!leaving?.confirmed) throw new Error("Vaga vazia.");
   const wasHost = leaving.confirmed.characterId === party.hostCharacterId;
+  const isSuggestionOrigin = party.origin === "suggestion";
 
-  const newSlots = party.slots.map((s, i) =>
-    s.index === slotIndex || i === slotIndex
-      ? { ...s, confirmed: null, entry: null }
-      : s
-  );
+  // Slot do player que sai: confirmed/entry zerado.
+  // Se a PT veio da sugestão automática, vaga vacated vira flex (vocations=[]).
+  // Se for manual, mantém vocs originais que o host configurou.
+  const newSlots = party.slots.map((s, i) => {
+    if (s.index === slotIndex || i === slotIndex) {
+      const next: Slot = {
+        ...s,
+        confirmed: null,
+        entry: null,
+        applicants: [],
+        invites: [],
+      };
+      if (isSuggestionOrigin) {
+        next.vocations = [];
+        next.vocation = "ANY";
+      }
+      return next;
+    }
+    return s;
+  });
   const remaining = newSlots.filter((s) => s.confirmed);
 
   if (remaining.length === 0) {
@@ -1062,6 +1091,18 @@ export async function leaveClosedParty(
     slots: newSlots.map(serializeSlot),
     updatedAt: serverTimestamp(),
   };
+
+  // PTs vindas da sugestão automática "ressuscitam" com requirements minimas:
+  // lvl 600 mínimo, demais filtros desativados. Manuais mantêm config do host.
+  if (isSuggestionOrigin) {
+    update.requirements = {
+      minLevel: { active: true, value: PRIMAL_PARTY_MIN_LEVEL },
+      minHazard: { active: false, value: 0 },
+      schedule: { active: false, value: [] },
+      experienced: { active: false },
+      questDone: { active: false, value: false },
+    } satisfies PartyRequirements;
+  }
 
   if (wasHost) {
     const pick = remaining[Math.floor(Math.random() * remaining.length)];
