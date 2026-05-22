@@ -13,7 +13,6 @@ import {
   where,
   writeBatch,
 } from "firebase/firestore";
-import { useEffect, useMemo, useState } from "react";
 import { db } from "./firebase";
 
 export type NotificationType =
@@ -174,28 +173,4 @@ export async function markNotificationAsRead(id: string) {
   } catch (err) {
     console.error("markNotificationAsRead falhou:", err);
   }
-}
-
-/**
- * Hook compartilhado: subscreve às notificações do user e devolve items + count.
- * Pode ser usado por múltiplos consumidores (ex: bell + tab badges).
- */
-export function useUserNotifications(userId: string | null | undefined) {
-  const [items, setItems] = useState<Notification[]>([]);
-
-  useEffect(() => {
-    if (!userId) {
-      setItems([]);
-      return;
-    }
-    const unsub = subscribeToUserNotifications(userId, setItems);
-    return () => unsub();
-  }, [userId]);
-
-  const unreadCount = useMemo(
-    () => items.filter((i) => !i.read).length,
-    [items]
-  );
-
-  return { items, unreadCount };
 }

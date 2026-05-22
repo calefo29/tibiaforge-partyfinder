@@ -39,7 +39,7 @@ import {
   PartyListFilters,
 } from "@/app/(components)/PartyListFilters";
 import { NotificationBell } from "@/app/(components)/NotificationBell";
-import { useUserNotifications } from "@/lib/notifications";
+import { useUserNotifications } from "@/lib/use-user-notifications";
 import type { Vocation } from "@/lib/characters";
 
 const VOC_COLORS: Record<string, string> = {
