@@ -76,39 +76,61 @@ export async function addCharacter(ownerId: string, input: CharacterInput) {
 }
 
 export async function updateCharacter(id: string, input: CharacterInput) {
-  // Lê estado anterior pra detectar mudança em questHistory.primal
-  // e sincronizar com a pool (player tem autonomia pra reverter "já fiz").
+  // Lê estado anterior pra detectar mudanças e sincronizar com a pool.
   const ref = doc(db, "characters", id);
   const before = await getDoc(ref);
   const beforeData = before.exists() ? before.data() : null;
   const oldPrimal = beforeData?.questHistory?.primal === true;
   const newPrimal = input.questHistory.primal === true;
+  const oldServer = beforeData?.server ?? "";
+  const newServer = input.server;
+  const oldName = beforeData?.name ?? "";
+  const newName = input.name.trim();
+  const oldVoc = beforeData?.vocation ?? "";
+  const newVoc = input.vocation;
+  const oldLevel = beforeData?.level ?? 0;
+  const newLevel = input.level;
 
   await updateDoc(ref, {
-    name: input.name.trim(),
-    vocation: input.vocation,
-    level: input.level,
-    server: input.server,
+    name: newName,
+    vocation: newVoc,
+    level: newLevel,
+    server: newServer,
     questHistory: input.questHistory,
     updatedAt: serverTimestamp(),
   });
 
-  // Se mudou o status de "já fez Primal", sincroniza pool entries do char:
-  // - false → true: inativa (não precisa mais matchmaking)
-  // - true → false: reativa (player desmarcou, talvez por erro do host)
-  if (oldPrimal !== newPrimal) {
+  // Sincroniza pool entries do char: status (quest done) + snapshot fields
+  const primalChanged = oldPrimal !== newPrimal;
+  const snapshotChanged =
+    oldServer !== newServer ||
+    oldName !== newName ||
+    oldVoc !== newVoc ||
+    oldLevel !== newLevel;
+
+  if (primalChanged || snapshotChanged) {
     try {
       const poolSnap = await getDocs(
         query(collection(db, "primalPool"), where("characterId", "==", id))
       );
       for (const d of poolSnap.docs) {
-        await updateDoc(d.ref, {
-          status: newPrimal ? "inactive" : "active",
+        const patch: Record<string, unknown> = {
           updatedAt: serverTimestamp(),
-        });
+        };
+        if (primalChanged) {
+          // false → true: inativa · true → false: reativa
+          patch.status = newPrimal ? "inactive" : "active";
+        }
+        if (snapshotChanged) {
+          patch.characterName = newName;
+          patch.vocation = newVoc;
+          patch.level = newLevel;
+          patch.server = newServer;
+        }
+        await updateDoc(d.ref, patch);
       }
     } catch (err) {
-      console.error("Falhou ao sincronizar pool após mudar questHistory:", err);
+      console.error("Falhou ao sincronizar pool após editar char:", err);
     }
   }
 }

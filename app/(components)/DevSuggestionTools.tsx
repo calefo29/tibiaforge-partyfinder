@@ -349,17 +349,26 @@ export function DevSuggestionTools() {
         return;
       }
       const myEntries: PrimalPoolEntry[] = myPoolSnap.docs.map((d) => mapEntry(d));
-      const myEntry = myEntries[0];
       append(
-        `🔎 Meu char: ${myEntry.characterName} (${myEntry.vocation}) · server="${myEntry.server || "VAZIO"}"`
+        `🔎 Você tem ${myEntries.length} char(s) na pool active: ${myEntries
+          .map(
+            (e) =>
+              `${e.characterName}(${e.vocation}, server="${e.server || "VAZIO"}")`
+          )
+          .join(" | ")}`
       );
 
+      // Prefere o primeiro com server válido; se nenhum, falha
+      const myEntry = myEntries.find((e) => !!e.server) ?? myEntries[0];
       if (!myEntry.server) {
         append(
-          `❌ Server do seu char tá vazio. Edita o char e seleciona um server (ex: Auroria) antes de sortear.`
+          `❌ Nenhum dos seus chars na pool tem server preenchido. Edita o(s) char(s) e seleciona um server (ex: Auroria).`
         );
         return;
       }
+      append(
+        `✅ Usando: ${myEntry.characterName} (${myEntry.vocation}) no server "${myEntry.server}"`
+      );
 
       // 2. Lê outros chars do mesmo server
       const allSnap = await getDocs(
