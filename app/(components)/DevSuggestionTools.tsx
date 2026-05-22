@@ -24,6 +24,7 @@ import {
   nextServerSave,
   SuggestionStatus,
 } from "@/lib/primal-suggestions";
+import { createNotificationsBulk } from "@/lib/notifications";
 
 const FAKE_NAMES = [
   "Carlos", "Maria", "Jose", "Alfredo", "Thiago", "Soxi", "Rafael", "Pedro",
@@ -193,12 +194,13 @@ export function DevSuggestionTools() {
       });
 
       let created = 0;
+      let notified = 0;
       const summary: string[] = [];
       for (const [server, pool] of byServer.entries()) {
         const parts = buildBestPartitionForServer(pool, 50);
         for (const slots of parts) {
           const meta = computePartitionMeta(slots);
-          await addDoc(collection(db, "primalSuggestions"), {
+          const ref = await addDoc(collection(db, "primalSuggestions"), {
             cycleDate,
             server,
             slots,
@@ -212,10 +214,31 @@ export function DevSuggestionTools() {
             expiresAt: Timestamp.fromDate(expiresAt),
           });
           created++;
+
+          // Notifica os 5 players sorteados (mesmo comportamento do cron real)
+          const ownerIds = slots
+            .map((s) => s.ownerId)
+            .filter(
+              (uid): uid is string => !!uid && !uid.startsWith("dummy_")
+            );
+          if (ownerIds.length > 0) {
+            await createNotificationsBulk(ownerIds, {
+              type: "suggestion_new",
+              title: "PT aleatória formada!",
+              body: `Você foi sorteado pra uma PT no ${server}. Avalie e aceite/recuse até o próximo SS.`,
+              link: "/quest/primal",
+              meta: { suggestionId: ref.id, server },
+            });
+            notified += ownerIds.length;
+          }
         }
         if (parts.length > 0) summary.push(`${server}: ${parts.length} PT(s)`);
       }
-      append(`✨ Matching: pool ${eligible.length} elegíveis → ${created} sugestões${summary.length ? " (" + summary.join(", ") + ")" : ""}`);
+      append(
+        `🔁 Ciclo simulado: ${oldSnap.size} expiradas → ${created} novas sugestões · ${notified} players notificados${
+          summary.length ? " (" + summary.join(", ") + ")" : ""
+        }`
+      );
     } catch (e) {
       append(`❌ Erro matching: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
@@ -227,11 +250,16 @@ export function DevSuggestionTools() {
     <div className="mb-5 bg-[var(--warn)]/8 border border-dashed border-[var(--warn)]/40 rounded-xl p-3">
       <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
         <div className="text-[10px] uppercase tracking-wider text-[var(--warn)] font-bold">
-          🛠 DEV — ferramentas de teste
+          🛠 ADMIN — ferramentas de teste
         </div>
         <div className="text-[10px] text-[var(--text-mute)]">
-          só em dev · não vai pra prod
+          visível só em dev ou pra admin · auto-cron roda diariamente às 10h BRT
         </div>
+      </div>
+      <div className="text-[11px] text-[var(--text-mute)] mb-2 leading-relaxed">
+        ⚙️ <strong className="text-[var(--text)]">Auto:</strong> todo dia às 10h BRT (13h UTC), o cron expira sugestões pendentes e sorteia novas pra cada char na pool.
+        <br />
+        🔁 <strong className="text-[var(--text)]">Manual:</strong> use o botão abaixo pra simular esse processo agora — útil pra testar sem esperar o próximo ciclo.
       </div>
       <div className="flex flex-wrap gap-2">
         <button
@@ -254,9 +282,12 @@ export function DevSuggestionTools() {
           type="button"
           disabled={!!busy}
           onClick={handleRunMatching}
-          className="text-xs border border-[var(--accent)]/50 text-[var(--accent)] hover:bg-[var(--accent)]/15 px-3 py-1.5 rounded transition disabled:opacity-50"
+          className="text-xs border border-[var(--accent)]/50 text-[var(--accent)] hover:bg-[var(--accent)]/15 px-3 py-1.5 rounded transition disabled:opacity-50 font-semibold"
+          title="Expira todas as sugestões pendentes/recusadas + sorteia novas pra cada char na pool"
         >
-          {busy === "match" ? "Calculando…" : "✨ Rodar matching agora"}
+          {busy === "match"
+            ? "Sorteando…"
+            : "🔁 Simular fim de prazo + sortear novamente"}
         </button>
       </div>
       {log.length > 0 && (
