@@ -9,6 +9,7 @@ import {
   SuggestionSlot,
 } from "@/lib/primal-suggestions";
 import { TURNO_LABELS } from "@/lib/primal-pool";
+import { useAuth } from "@/lib/auth-context";
 
 const VOC_COLORS: Record<string, string> = {
   EK: "text-[#fbbf24]",
@@ -29,6 +30,11 @@ export function SuggestionCard({
   myCharacterIds,
   lockedCharIds,
 }: Props) {
+  const { user } = useAuth();
+  const adminUid = process.env.NEXT_PUBLIC_ADMIN_UID ?? "";
+  const isAdminOrDev =
+    process.env.NODE_ENV === "development" ||
+    (!!user && !!adminUid && user.uid === adminUid);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmingDecline, setConfirmingDecline] = useState(false);
@@ -181,7 +187,7 @@ export function SuggestionCard({
         </div>
       )}
 
-      {process.env.NODE_ENV === "development" && !isDeclined && suggestion.status === "pending" && (
+      {isAdminOrDev && !isDeclined && suggestion.status === "pending" && (
         <DevAcceptControls suggestion={suggestion} />
       )}
 
