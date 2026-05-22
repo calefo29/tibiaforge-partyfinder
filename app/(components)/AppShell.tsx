@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { AppSidebar } from "./AppSidebar";
 import { Brand } from "./Brand";
-import { NotificationBell } from "./NotificationBell";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -49,7 +48,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="flex-1 min-w-0">
             <Brand />
           </div>
-          <NotificationBell />
         </header>
 
         <main className="flex-1 min-w-0">{children}</main>

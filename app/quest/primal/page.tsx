@@ -38,6 +38,8 @@ import {
   PartyFiltersState,
   PartyListFilters,
 } from "@/app/(components)/PartyListFilters";
+import { NotificationBell } from "@/app/(components)/NotificationBell";
+import { useUserNotifications } from "@/lib/notifications";
 import type { Vocation } from "@/lib/characters";
 
 const VOC_COLORS: Record<string, string> = {
@@ -281,6 +283,37 @@ export default function PrimalHubPage() {
     [mySuggestions]
   );
 
+  // Notificações
+  const { items: notifItems, unreadCount: notifUnread } = useUserNotifications(
+    user?.uid
+  );
+
+  // Badge de não-lidas por tab
+  const tabUnread = useMemo(() => {
+    const byTab: Record<string, number> = {
+      pool: 0,
+      pts: 0,
+      sugestao: 0,
+      minhas: 0,
+    };
+    notifItems.forEach((n) => {
+      if (n.read) return;
+      if (n.type === "suggestion_new" || n.type === "suggestion_closing_soon") {
+        byTab.sugestao++;
+      } else if (n.type === "party_closed") {
+        byTab.minhas++;
+      } else if (
+        n.type === "apply_received" ||
+        n.type === "invite_received" ||
+        n.type === "application_accepted" ||
+        n.type === "invite_accepted"
+      ) {
+        byTab.pts++;
+      }
+    });
+    return byTab;
+  }, [notifItems]);
+
   const poolByVocation = useMemo(() => {
     const counts: Record<string, number> = { EK: 0, ED: 0, RP: 0, MS: 0, EM: 0 };
     (pool ?? []).forEach((e) => {
@@ -334,6 +367,13 @@ export default function PrimalHubPage() {
                 </span>
               </div>
             </div>
+            {/* Sininho de notificações — fica dentro da página */}
+            <NotificationBell
+              userId={user?.uid}
+              items={notifItems}
+              unreadCount={notifUnread}
+              anchor="right"
+            />
           </div>
 
           {/* Tab bar segmented */}
@@ -344,6 +384,7 @@ export default function PrimalHubPage() {
               icon="👥"
               label="Add Personagem"
               badge={pool?.length}
+              alertCount={tabUnread.pool}
             />
             <TabButton
               active={tab === "pts"}
@@ -351,6 +392,7 @@ export default function PrimalHubPage() {
               icon="⚔️"
               label="PTs criadas"
               badge={ptsCriadasCount}
+              alertCount={tabUnread.pts}
             />
             <TabButton
               active={tab === "sugestao"}
@@ -358,6 +400,7 @@ export default function PrimalHubPage() {
               icon="✨"
               label="Sugestão automática"
               badge={sugestaoCount}
+              alertCount={tabUnread.sugestao}
             />
             <TabButton
               active={tab === "minhas"}
@@ -365,6 +408,7 @@ export default function PrimalHubPage() {
               icon="🛡️"
               label="Minhas PTs"
               badge={minhasPtsCount}
+              alertCount={tabUnread.minhas}
             />
           </div>
         </div>
@@ -813,18 +857,21 @@ function TabButton({
   icon,
   label,
   badge,
+  alertCount,
 }: {
   active: boolean;
   onClick: () => void;
   icon: string;
   label: string;
   badge?: number;
+  /** Badge vermelho de não-lidas (alertas) — independente do badge normal. */
+  alertCount?: number;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`flex-1 min-w-[140px] flex items-center justify-center gap-2 px-3 py-2.5 rounded-md text-sm font-medium transition border ${
+      className={`flex-1 min-w-[140px] flex items-center justify-center gap-2 px-3 py-2.5 rounded-md text-sm font-medium transition border relative ${
         active
           ? "bg-[var(--accent)] text-[#04122a] border-[var(--accent)] shadow-[0_0_20px_rgba(96,165,250,0.25)]"
           : "bg-transparent text-[var(--text-mute)] border-transparent hover:bg-[var(--background-elev-2)] hover:text-[var(--text)]"
@@ -841,6 +888,15 @@ function TabButton({
           }`}
         >
           {badge}
+        </span>
+      )}
+      {typeof alertCount === "number" && alertCount > 0 && (
+        <span
+          className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-[var(--danger)] text-white text-[10px] font-bold flex items-center justify-center leading-none border-2 border-[var(--background)] animate-pulse"
+          aria-label={`${alertCount} não lidas`}
+          title={`${alertCount} não lidas`}
+        >
+          {alertCount > 9 ? "9+" : alertCount}
         </span>
       )}
     </button>

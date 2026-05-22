@@ -1,13 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useAuth } from "@/lib/auth-context";
 import {
   markAllNotificationsAsRead,
   markNotificationAsRead,
   Notification,
-  subscribeToUserNotifications,
 } from "@/lib/notifications";
 
 const TYPE_ICON: Record<string, string> = {
@@ -20,24 +18,28 @@ const TYPE_ICON: Record<string, string> = {
   suggestion_closing_soon: "⏰",
 };
 
-export function NotificationBell() {
-  const { user } = useAuth();
-  const [items, setItems] = useState<Notification[]>([]);
-  const [open, setOpen] = useState(false);
-  const panelRef = useRef<HTMLDivElement | null>(null);
+type Props = {
+  userId: string | null | undefined;
+  items: Notification[];
+  unreadCount: number;
+  /** Posição do dropdown — left/right anchor. Default "right" (panel cresce pra esquerda). */
+  anchor?: "left" | "right";
+};
 
-  // Subscribe
-  useEffect(() => {
-    if (!user) return;
-    const unsub = subscribeToUserNotifications(user.uid, setItems);
-    return () => unsub();
-  }, [user]);
+export function NotificationBell({
+  userId,
+  items,
+  unreadCount,
+  anchor = "right",
+}: Props) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement | null>(null);
 
   // Fecha ao clicar fora ou apertar Esc
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
-      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
         setOpen(false);
       }
     };
@@ -52,28 +54,19 @@ export function NotificationBell() {
     };
   }, [open]);
 
-  const unreadCount = useMemo(
-    () => items.filter((i) => !i.read).length,
-    [items]
-  );
-
   // Tab title piscando quando aba fora de foco + houver não-lidas
   useEffect(() => {
     if (typeof document === "undefined") return;
     const originalTitle = "TibiaForge Party Finder";
-
     const reset = () => {
       document.title = originalTitle;
     };
-
     if (unreadCount === 0) {
       reset();
       return;
     }
-
     let blinkOn = false;
     let intervalId: ReturnType<typeof setInterval> | null = null;
-
     const stopBlink = () => {
       if (intervalId) {
         clearInterval(intervalId);
@@ -81,7 +74,6 @@ export function NotificationBell() {
       }
       reset();
     };
-
     const startBlink = () => {
       if (intervalId) return;
       intervalId = setInterval(() => {
@@ -91,19 +83,12 @@ export function NotificationBell() {
           : `(${unreadCount}) ${originalTitle}`;
       }, 1000);
     };
-
     const handleVisibility = () => {
-      if (document.visibilityState === "hidden") {
-        startBlink();
-      } else {
-        stopBlink();
-      }
+      if (document.visibilityState === "hidden") startBlink();
+      else stopBlink();
     };
-
-    // Estado inicial
     handleVisibility();
     document.addEventListener("visibilitychange", handleVisibility);
-
     return () => {
       document.removeEventListener("visibilitychange", handleVisibility);
       stopBlink();
@@ -113,9 +98,8 @@ export function NotificationBell() {
   const handleOpen = () => {
     setOpen((prev) => {
       const next = !prev;
-      // Ao abrir, marca todas como lidas (zera o contador).
-      if (next && user && unreadCount > 0) {
-        markAllNotificationsAsRead(user.uid).catch(() => {});
+      if (next && userId && unreadCount > 0) {
+        markAllNotificationsAsRead(userId).catch(() => {});
       }
       return next;
     });
@@ -126,14 +110,14 @@ export function NotificationBell() {
     setOpen(false);
   };
 
-  if (!user) return null;
+  if (!userId) return null;
 
   return (
-    <div className="relative" ref={panelRef}>
+    <div className="relative inline-block" ref={containerRef}>
       <button
         type="button"
         onClick={handleOpen}
-        className="relative p-1.5 rounded-md text-[var(--text-mute)] hover:text-[var(--text)] hover:bg-[var(--background-elev-2)] transition"
+        className="relative p-1.5 rounded-md text-[var(--text-mute)] hover:text-[var(--text)] hover:bg-[var(--background-elev-2)] transition border border-transparent hover:border-[var(--border-strong)]"
         aria-label={`Notificações${unreadCount > 0 ? ` (${unreadCount} não lidas)` : ""}`}
       >
         <svg
@@ -159,7 +143,9 @@ export function NotificationBell() {
 
       {open && (
         <div
-          className="absolute right-0 top-full mt-2 w-[320px] max-w-[calc(100vw-24px)] bg-[var(--background-elev)] border border-[var(--border-strong)] rounded-lg shadow-2xl overflow-hidden z-50"
+          className={`absolute top-full mt-2 w-[320px] max-w-[calc(100vw-24px)] bg-[var(--background-elev)] border border-[var(--border-strong)] rounded-lg shadow-2xl overflow-hidden z-50 ${
+            anchor === "right" ? "right-0" : "left-0"
+          }`}
         >
           <div className="px-3 py-2 border-b border-[var(--border)] flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wider text-[var(--text-mute)]">
