@@ -33,6 +33,12 @@ import { EditPartyModal } from "@/app/(components)/EditPartyModal";
 import { PartyCard } from "@/app/(components)/PartyCard";
 import { SuggestionCard } from "@/app/(components)/SuggestionCard";
 import { DevSuggestionTools } from "@/app/(components)/DevSuggestionTools";
+import {
+  EMPTY_PARTY_FILTERS,
+  PartyFiltersState,
+  PartyListFilters,
+} from "@/app/(components)/PartyListFilters";
+import type { Vocation } from "@/lib/characters";
 
 const VOC_COLORS: Record<string, string> = {
   EK: "text-[#fbbf24]",
@@ -206,6 +212,64 @@ export default function PrimalHubPage() {
       ),
     [allParties, myUid]
   );
+
+  // Filtros da aba "Outras PTs"
+  const [partyFilters, setPartyFilters] =
+    useState<PartyFiltersState>(EMPTY_PARTY_FILTERS);
+
+  const availableServers = useMemo(() => {
+    const set = new Set<string>();
+    othersFormingParties.forEach((p) => {
+      if (p.server) set.add(p.server);
+    });
+    return Array.from(set).sort();
+  }, [othersFormingParties]);
+
+  const filteredOthersFormingParties = useMemo(() => {
+    return othersFormingParties.filter((p) => {
+      // Server
+      if (partyFilters.server && p.server !== partyFilters.server) return false;
+      // Host name
+      const q = partyFilters.hostQuery.trim().toLowerCase();
+      if (q) {
+        const hostName = (p.hostCharacterName ?? "").toLowerCase();
+        if (!hostName.includes(q)) return false;
+      }
+      // Level máx exigido (filter pega só PTs que cabem no meu char)
+      if (partyFilters.maxMinLevel > 0 && p.requirements?.minLevel?.active) {
+        if (p.requirements.minLevel.value > partyFilters.maxMinLevel) return false;
+      }
+      // Hazard máx exigido
+      if (partyFilters.maxMinHazard > 0 && p.requirements?.minHazard?.active) {
+        if (p.requirements.minHazard.value > partyFilters.maxMinHazard) return false;
+      }
+      // Turnos: se PT tem schedule.active, precisa ter overlap; se não, passa
+      if (partyFilters.schedule.size > 0) {
+        if (
+          p.requirements?.schedule?.active &&
+          p.requirements.schedule.value.length > 0
+        ) {
+          const overlap = p.requirements.schedule.value.some((t) =>
+            partyFilters.schedule.has(t)
+          );
+          if (!overlap) return false;
+        }
+        // PT sem restrição de schedule = combina com qualquer filtro
+      }
+      // Vagas precisando voc: pelo menos 1 slot aberto que aceite a voc selecionada
+      if (partyFilters.vocsNeeded.size > 0) {
+        const openSlots = p.slots.filter((s) => !s.confirmed);
+        const accepts = openSlots.some((s) => {
+          if (s.vocations.length === 0) return true; // qualquer voc
+          return s.vocations.some((v) =>
+            partyFilters.vocsNeeded.has(v as Vocation)
+          );
+        });
+        if (!accepts) return false;
+      }
+      return true;
+    });
+  }, [othersFormingParties, partyFilters]);
 
   const ptsCriadasCount = allParties?.length ?? 0;
   const minhasPtsCount = myClosedParties.length;
@@ -476,6 +540,15 @@ export default function PrimalHubPage() {
                   Candidate seu char
                 </span>
               </div>
+              {othersFormingParties.length > 0 && (
+                <PartyListFilters
+                  value={partyFilters}
+                  onChange={setPartyFilters}
+                  availableServers={availableServers}
+                  totalCount={othersFormingParties.length}
+                  filteredCount={filteredOthersFormingParties.length}
+                />
+              )}
               {allParties === null ? (
                 <div className="text-center text-sm text-[var(--text-mute)] py-6">
                   Carregando…
@@ -484,9 +557,14 @@ export default function PrimalHubPage() {
                 <div className="border border-dashed border-[var(--border-strong)] rounded-lg p-6 text-center text-sm text-[var(--text-mute)]">
                   Nenhuma PT de outros players aberta no momento.
                 </div>
+              ) : filteredOthersFormingParties.length === 0 ? (
+                <div className="border border-dashed border-[var(--border-strong)] rounded-lg p-6 text-center text-sm text-[var(--text-mute)]">
+                  Nenhuma PT bate com os filtros atuais. Limpa os filtros pra ver
+                  tudo.
+                </div>
               ) : (
                 <div className="space-y-3.5">
-                  {othersFormingParties.map((p) => (
+                  {filteredOthersFormingParties.map((p) => (
                     <PartyCard
                       key={p.id}
                       party={p}
