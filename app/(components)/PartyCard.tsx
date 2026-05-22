@@ -1242,8 +1242,23 @@ function SlotManagePopup({
   const overlayProps = useOverlayClose(onClose);
   const [applicantSearch, setApplicantSearch] = useState("");
   const [inviteSearch, setInviteSearch] = useState("");
+  const [vocFilter, setVocFilter] = useState<Set<Vocation>>(new Set());
 
   const slotVocLabel = slotVocationLabel(slot.vocations);
+  const slotAcceptsAny = (slot?.vocations ?? []).length === 0;
+  const slotVocSet = useMemo(
+    () => new Set<Vocation>(slot?.vocations ?? []),
+    [slot]
+  );
+
+  const toggleVocFilter = (v: Vocation) => {
+    setVocFilter((prev) => {
+      const next = new Set(prev);
+      if (next.has(v)) next.delete(v);
+      else next.add(v);
+      return next;
+    });
+  };
 
   const applicants = slot?.applicants ?? [];
   const invitedCharIds = useMemo(
@@ -1323,11 +1338,13 @@ function SlotManagePopup({
 
   const filteredInviteRows = useMemo(() => {
     const q = inviteSearch.trim().toLowerCase();
-    if (!q) return inviteRows;
-    return inviteRows.filter((r) =>
-      r.entry.characterName.toLowerCase().includes(q)
-    );
-  }, [inviteRows, inviteSearch]);
+    return inviteRows.filter((r) => {
+      if (q && !r.entry.characterName.toLowerCase().includes(q)) return false;
+      if (vocFilter.size > 0 && !vocFilter.has(r.entry.vocation as Vocation))
+        return false;
+      return true;
+    });
+  }, [inviteRows, inviteSearch, vocFilter]);
 
   if (!slot) return null;
 
@@ -1475,6 +1492,45 @@ function SlotManagePopup({
                 · servidor {party.server}
               </span>
             </div>
+            {/* Filtro de vocação — vocs aceitas pela vaga habilitadas, outras disabled */}
+            <div className="flex flex-wrap gap-1 mb-2">
+              {(["EK", "ED", "RP", "MS", "EM"] as Vocation[]).map((v) => {
+                const allowed = slotAcceptsAny || slotVocSet.has(v);
+                const active = vocFilter.has(v);
+                const colorCls = VOC_COLORS[v] ?? "text-[var(--accent)]";
+                const title = allowed
+                  ? `Filtrar por ${v}`
+                  : `Vaga aceita: ${slotVocLabel}`;
+                return (
+                  <button
+                    key={v}
+                    type="button"
+                    disabled={!allowed}
+                    onClick={() => allowed && toggleVocFilter(v)}
+                    title={title}
+                    className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border transition ${
+                      !allowed
+                        ? "opacity-35 cursor-not-allowed border-[var(--border)] bg-[var(--background-elev-2)]/40 text-[var(--text-dim)]"
+                        : active
+                          ? `${colorCls} border-current bg-[var(--background-elev-2)]`
+                          : `${colorCls} border-[var(--border-strong)] hover:border-current bg-[var(--background-elev-2)]/60`
+                    }`}
+                  >
+                    {v}
+                  </button>
+                );
+              })}
+              {vocFilter.size > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setVocFilter(new Set())}
+                  className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded border border-[var(--border-strong)] text-[var(--text-dim)] hover:text-[var(--text)] transition"
+                  title="Limpar filtro"
+                >
+                  Limpar
+                </button>
+              )}
+            </div>
             <input
               type="text"
               value={inviteSearch}
@@ -1583,6 +1639,12 @@ function RequirementChips({ party }: { party: PrimalParty }) {
   }
   if (r.experienced?.active) {
     chips.push({ icon: "🎯", label: "Com experiência" });
+  }
+  if (r.questDone?.active) {
+    chips.push({
+      icon: r.questDone.value ? "🎖️" : "🆕",
+      label: r.questDone.value ? "Apenas veteranos" : "Apenas iniciantes",
+    });
   }
   if (chips.length === 0) {
     return (
