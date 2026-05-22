@@ -11,6 +11,7 @@ import {
   serverTimestamp,
   setDoc,
   Timestamp,
+  updateDoc,
   where,
   writeBatch,
 } from "firebase/firestore";
@@ -70,11 +71,11 @@ export function DevSuggestionTools() {
   const append = (msg: string) =>
     setLog((l) => [`${new Date().toLocaleTimeString()} — ${msg}`, ...l].slice(0, 8));
 
-  // Subscribe à pool inteira (debug) — só monta quando user abre a tela
+  // Subscribe à pool inteira (debug) — SEM filtro de status, mostra tudo
   useEffect(() => {
     if (!poolDebugOpen) return;
     const unsub = onSnapshot(
-      query(collection(db, "primalPool"), where("status", "==", "active")),
+      collection(db, "primalPool"),
       (snap) => {
         setPoolDebug(snap.docs.map((d) => mapEntry(d)));
       },
@@ -730,11 +731,32 @@ function PoolDebugView({
     byServer.get(key)!.push(e);
   });
 
+  const activeCount = entries.filter((e) => e.status === "active").length;
+  const inactiveCount = entries.filter((e) => e.status !== "active").length;
+
+  const reactivate = async (id: string) => {
+    try {
+      await updateDoc(doc(db, "primalPool", id), {
+        status: "active",
+        updatedAt: serverTimestamp(),
+      });
+    } catch (err) {
+      console.error("Reactivate falhou:", err);
+    }
+  };
+
   return (
     <div className="space-y-3">
       <div className="text-[10px] text-[var(--text-mute)]">
         Total: <strong className="text-[var(--text)]">{entries.length}</strong>{" "}
-        chars · {byServer.size} server(s)
+        chars · {byServer.size} server(s) ·{" "}
+        <span className="text-[var(--ok)]">{activeCount} active</span>
+        {inactiveCount > 0 && (
+          <>
+            {" · "}
+            <span className="text-[var(--danger)]">{inactiveCount} inactive</span>
+          </>
+        )}
       </div>
       {Array.from(byServer.entries())
         .sort(([a], [b]) => a.localeCompare(b))
@@ -765,16 +787,16 @@ function PoolDebugView({
                   )}
                 </span>
               </div>
-              <div className="max-h-[200px] overflow-y-auto">
+              <div className="max-h-[260px] overflow-y-auto">
                 <table className="w-full text-[10px] font-mono">
                   <thead className="text-[var(--text-dim)] sticky top-0 bg-[var(--background)]">
                     <tr>
                       <th className="text-left px-2 py-1">Voc</th>
                       <th className="text-left px-2 py-1">Nome</th>
                       <th className="text-right px-2 py-1">Lvl</th>
-                      <th className="text-right px-2 py-1">Hzd</th>
-                      <th className="text-left px-2 py-1">Turnos</th>
+                      <th className="text-left px-2 py-1">Status</th>
                       <th className="text-left px-2 py-1">Tag</th>
+                      <th className="text-left px-2 py-1">Ação</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -783,27 +805,31 @@ function PoolDebugView({
                       .map((e) => {
                         const isDummy = e.ownerId?.startsWith("__dummy_") || e.ownerId?.startsWith("dummy_");
                         const isMine = myUid && e.ownerId === myUid;
+                        const isActive = e.status === "active";
                         return (
                           <tr
                             key={e.id}
                             className={`border-t border-[var(--border)] ${
                               isMine ? "bg-[var(--accent)]/8" : ""
-                            }`}
+                            } ${!isActive ? "opacity-60" : ""}`}
                           >
                             <td className={`px-2 py-0.5 font-bold ${vocColorClass(e.vocation)}`}>
                               {e.vocation || "?"}
                             </td>
-                            <td className="px-2 py-0.5 truncate max-w-[140px]">
+                            <td className="px-2 py-0.5 truncate max-w-[160px]">
                               {e.characterName || "(sem nome)"}
                             </td>
                             <td className="px-2 py-0.5 text-right tabular-nums">
                               {e.level}
                             </td>
-                            <td className="px-2 py-0.5 text-right tabular-nums text-[var(--text-mute)]">
-                              {e.hazard}
-                            </td>
-                            <td className="px-2 py-0.5 text-[var(--text-dim)] truncate max-w-[120px]">
-                              {(e.availability ?? []).join("/")}
+                            <td className="px-2 py-0.5">
+                              {isActive ? (
+                                <span className="text-[var(--ok)]">active</span>
+                              ) : (
+                                <span className="text-[var(--danger)]">
+                                  {e.status || "?"}
+                                </span>
+                              )}
                             </td>
                             <td className="px-2 py-0.5">
                               {isMine && (
@@ -814,6 +840,18 @@ function PoolDebugView({
                               )}
                               {!isMine && !isDummy && (
                                 <span className="text-[var(--text-dim)]">real</span>
+                              )}
+                            </td>
+                            <td className="px-2 py-0.5">
+                              {!isActive && (
+                                <button
+                                  type="button"
+                                  onClick={() => reactivate(e.id)}
+                                  className="text-[9px] uppercase tracking-wider border border-[var(--ok)]/50 text-[var(--ok)] hover:bg-[var(--ok)]/15 px-1.5 py-0.5 rounded transition"
+                                  title="Marca esse char como active novamente"
+                                >
+                                  ↻ Reativar
+                                </button>
                               )}
                             </td>
                           </tr>
