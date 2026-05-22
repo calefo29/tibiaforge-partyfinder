@@ -57,6 +57,59 @@ export function NotificationBell() {
     [items]
   );
 
+  // Tab title piscando quando aba fora de foco + houver não-lidas
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const originalTitle = "TibiaForge Party Finder";
+
+    const reset = () => {
+      document.title = originalTitle;
+    };
+
+    if (unreadCount === 0) {
+      reset();
+      return;
+    }
+
+    let blinkOn = false;
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+
+    const stopBlink = () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+        intervalId = null;
+      }
+      reset();
+    };
+
+    const startBlink = () => {
+      if (intervalId) return;
+      intervalId = setInterval(() => {
+        blinkOn = !blinkOn;
+        document.title = blinkOn
+          ? `🔔 (${unreadCount}) Atenção!`
+          : `(${unreadCount}) ${originalTitle}`;
+      }, 1000);
+    };
+
+    const handleVisibility = () => {
+      if (document.visibilityState === "hidden") {
+        startBlink();
+      } else {
+        stopBlink();
+      }
+    };
+
+    // Estado inicial
+    handleVisibility();
+    document.addEventListener("visibilitychange", handleVisibility);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+      stopBlink();
+    };
+  }, [unreadCount]);
+
   const handleOpen = () => {
     setOpen((prev) => {
       const next = !prev;
