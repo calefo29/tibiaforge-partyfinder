@@ -64,9 +64,24 @@ export function DevSuggestionTools() {
   const [busy, setBusy] = useState<string | null>(null);
   const [log, setLog] = useState<string[]>([]);
   const [lastRun, setLastRun] = useState<LastRun | null>(null);
+  const [poolDebug, setPoolDebug] = useState<PrimalPoolEntry[] | null>(null);
+  const [poolDebugOpen, setPoolDebugOpen] = useState(false);
 
   const append = (msg: string) =>
     setLog((l) => [`${new Date().toLocaleTimeString()} — ${msg}`, ...l].slice(0, 8));
+
+  // Subscribe à pool inteira (debug) — só monta quando user abre a tela
+  useEffect(() => {
+    if (!poolDebugOpen) return;
+    const unsub = onSnapshot(
+      query(collection(db, "primalPool"), where("status", "==", "active")),
+      (snap) => {
+        setPoolDebug(snap.docs.map((d) => mapEntry(d)));
+      },
+      () => setPoolDebug([])
+    );
+    return () => unsub();
+  }, [poolDebugOpen]);
 
   // Subscribe à última execução do cron pra exibir no UI
   useEffect(() => {
@@ -334,6 +349,16 @@ export function DevSuggestionTools() {
       }
       const myEntries: PrimalPoolEntry[] = myPoolSnap.docs.map((d) => mapEntry(d));
       const myEntry = myEntries[0];
+      append(
+        `🔎 Meu char: ${myEntry.characterName} (${myEntry.vocation}) · server="${myEntry.server || "VAZIO"}"`
+      );
+
+      if (!myEntry.server) {
+        append(
+          `❌ Server do seu char tá vazio. Edita o char e seleciona um server (ex: Auroria) antes de sortear.`
+        );
+        return;
+      }
 
       // 2. Lê outros chars do mesmo server
       const allSnap = await getDocs(
@@ -346,6 +371,15 @@ export function DevSuggestionTools() {
       const others: PrimalPoolEntry[] = allSnap.docs
         .map((d) => mapEntry(d))
         .filter((e) => e.characterId !== myEntry.characterId);
+      append(
+        `🔎 Outros chars no server "${myEntry.server}": ${others.length} (EK:${
+          others.filter((e) => e.vocation === "EK").length
+        }, ED:${others.filter((e) => e.vocation === "ED").length}, RP:${
+          others.filter((e) => e.vocation === "RP").length
+        }, MS:${others.filter((e) => e.vocation === "MS").length}, EM:${
+          others.filter((e) => e.vocation === "EM").length
+        })`
+      );
 
       // 3. Greedy: preenche pra satisfazer composição
       const counts: Record<string, number> = {
@@ -651,8 +685,159 @@ export function DevSuggestionTools() {
           ))}
         </div>
       )}
+
+      {/* Tela de debug: inspecionar pool ativa */}
+      <div className="mt-3 pt-2 border-t border-[var(--warn)]/20">
+        <button
+          type="button"
+          onClick={() => setPoolDebugOpen((o) => !o)}
+          className="text-[10px] uppercase tracking-wider text-[var(--warn)] font-semibold hover:text-[var(--text)] transition flex items-center gap-1"
+        >
+          <span>{poolDebugOpen ? "▾" : "▸"}</span>
+          <span>🔬 Inspecionar pool (debug, tela temporária)</span>
+        </button>
+
+        {poolDebugOpen && (
+          <div className="mt-2 bg-[var(--background)]/60 border border-[var(--border)] rounded p-2">
+            {poolDebug === null ? (
+              <div className="text-[10px] text-[var(--text-mute)]">Carregando…</div>
+            ) : poolDebug.length === 0 ? (
+              <div className="text-[10px] text-[var(--text-mute)]">
+                Pool ativa vazia.
+              </div>
+            ) : (
+              <PoolDebugView entries={poolDebug} myUid={user?.uid ?? null} />
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
+}
+
+function PoolDebugView({
+  entries,
+  myUid,
+}: {
+  entries: PrimalPoolEntry[];
+  myUid: string | null;
+}) {
+  // Agrupa por server
+  const byServer = new Map<string, PrimalPoolEntry[]>();
+  entries.forEach((e) => {
+    const key = e.server || "(server vazio)";
+    if (!byServer.has(key)) byServer.set(key, []);
+    byServer.get(key)!.push(e);
+  });
+
+  return (
+    <div className="space-y-3">
+      <div className="text-[10px] text-[var(--text-mute)]">
+        Total: <strong className="text-[var(--text)]">{entries.length}</strong>{" "}
+        chars · {byServer.size} server(s)
+      </div>
+      {Array.from(byServer.entries())
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([server, list]) => {
+          const counts = {
+            EK: list.filter((e) => e.vocation === "EK").length,
+            ED: list.filter((e) => e.vocation === "ED").length,
+            RP: list.filter((e) => e.vocation === "RP").length,
+            MS: list.filter((e) => e.vocation === "MS").length,
+            EM: list.filter((e) => e.vocation === "EM").length,
+          };
+          const other = list.length - Object.values(counts).reduce((a, b) => a + b, 0);
+          return (
+            <div key={server} className="border border-[var(--border)] rounded">
+              <div className="px-2 py-1.5 bg-[var(--background-elev-2)]/50 border-b border-[var(--border)] flex items-center justify-between gap-2 flex-wrap">
+                <span className="text-[11px] font-semibold">
+                  📍 {server}{" "}
+                  <span className="text-[var(--text-dim)]">· {list.length} chars</span>
+                </span>
+                <span className="text-[10px] font-mono">
+                  <span className="text-[#fbbf24]">EK:{counts.EK}</span>{" "}
+                  <span className="text-[#4ade80]">ED:{counts.ED}</span>{" "}
+                  <span className="text-[#a78bfa]">RP:{counts.RP}</span>{" "}
+                  <span className="text-[#f87171]">MS:{counts.MS}</span>{" "}
+                  <span className="text-[#22d3ee]">EM:{counts.EM}</span>
+                  {other > 0 && (
+                    <span className="text-[var(--danger)]"> ?:{other}</span>
+                  )}
+                </span>
+              </div>
+              <div className="max-h-[200px] overflow-y-auto">
+                <table className="w-full text-[10px] font-mono">
+                  <thead className="text-[var(--text-dim)] sticky top-0 bg-[var(--background)]">
+                    <tr>
+                      <th className="text-left px-2 py-1">Voc</th>
+                      <th className="text-left px-2 py-1">Nome</th>
+                      <th className="text-right px-2 py-1">Lvl</th>
+                      <th className="text-right px-2 py-1">Hzd</th>
+                      <th className="text-left px-2 py-1">Turnos</th>
+                      <th className="text-left px-2 py-1">Tag</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {list
+                      .sort((a, b) => a.vocation.localeCompare(b.vocation))
+                      .map((e) => {
+                        const isDummy = e.ownerId?.startsWith("__dummy_") || e.ownerId?.startsWith("dummy_");
+                        const isMine = myUid && e.ownerId === myUid;
+                        return (
+                          <tr
+                            key={e.id}
+                            className={`border-t border-[var(--border)] ${
+                              isMine ? "bg-[var(--accent)]/8" : ""
+                            }`}
+                          >
+                            <td className={`px-2 py-0.5 font-bold ${vocColorClass(e.vocation)}`}>
+                              {e.vocation || "?"}
+                            </td>
+                            <td className="px-2 py-0.5 truncate max-w-[140px]">
+                              {e.characterName || "(sem nome)"}
+                            </td>
+                            <td className="px-2 py-0.5 text-right tabular-nums">
+                              {e.level}
+                            </td>
+                            <td className="px-2 py-0.5 text-right tabular-nums text-[var(--text-mute)]">
+                              {e.hazard}
+                            </td>
+                            <td className="px-2 py-0.5 text-[var(--text-dim)] truncate max-w-[120px]">
+                              {(e.availability ?? []).join("/")}
+                            </td>
+                            <td className="px-2 py-0.5">
+                              {isMine && (
+                                <span className="text-[var(--accent)] font-bold">EU</span>
+                              )}
+                              {!isMine && isDummy && (
+                                <span className="text-[var(--warn)]">dummy</span>
+                              )}
+                              {!isMine && !isDummy && (
+                                <span className="text-[var(--text-dim)]">real</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          );
+        })}
+    </div>
+  );
+}
+
+function vocColorClass(voc: string): string {
+  switch (voc) {
+    case "EK": return "text-[#fbbf24]";
+    case "ED": return "text-[#4ade80]";
+    case "RP": return "text-[#a78bfa]";
+    case "MS": return "text-[#f87171]";
+    case "EM": return "text-[#22d3ee]";
+    default: return "text-[var(--danger)]";
+  }
 }
 
 function mapEntry(
