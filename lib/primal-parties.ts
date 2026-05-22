@@ -14,6 +14,9 @@ import {
 import { db } from "./firebase";
 import { Character, Vocation } from "./characters";
 import { PrimalPoolEntry, Turno } from "./primal-pool";
+import { createNotification, createNotificationsBulk } from "./notifications";
+
+const NOTIF_LINK = "/quest/primal";
 
 export const PRIMAL_PARTY_SIZE = 5;
 export const PRIMAL_PARTY_MIN_LEVEL = 600;
@@ -544,6 +547,42 @@ export async function applyToSlot(
     slots: slots.map(serializeSlot),
     updatedAt: serverTimestamp(),
   });
+
+  // Notificações
+  const playerName = snapshot.characterName ?? "Um player";
+  if (matchingInvite) {
+    // Cross-match: ambos os lados confirmados
+    if (party.hostUid && party.hostUid !== ownerId) {
+      createNotification({
+        userId: party.hostUid,
+        type: "invite_accepted",
+        title: "Convite confirmado (cross-match)",
+        body: `${playerName} se candidatou e cruzou com seu convite — vaga ${slotIndex + 1} fechada.`,
+        link: NOTIF_LINK,
+        meta: { partyId, slotIndex },
+      });
+    }
+    if (ownerId && ownerId !== party.hostUid) {
+      createNotification({
+        userId: ownerId,
+        type: "application_accepted",
+        title: "Confirmado na PT!",
+        body: `Sua candidatura cruzou com um convite do host — você está confirmado na vaga ${slotIndex + 1}.`,
+        link: NOTIF_LINK,
+        meta: { partyId, slotIndex },
+      });
+    }
+  } else if (party.hostUid && party.hostUid !== ownerId) {
+    // Aplicação simples → notifica host
+    createNotification({
+      userId: party.hostUid,
+      type: "apply_received",
+      title: "Nova candidatura",
+      body: `${playerName} se candidatou na vaga ${slotIndex + 1} da sua PT.`,
+      link: NOTIF_LINK,
+      meta: { partyId, slotIndex },
+    });
+  }
 }
 
 /**
@@ -594,6 +633,43 @@ export async function inviteToSlot(
     slots: slots.map(serializeSlot),
     updatedAt: serverTimestamp(),
   });
+
+  // Notificações
+  const playerName = snapshot.characterName ?? "Um player";
+  const hostName = party.hostCharacterName ?? "o host";
+  if (matchingApply) {
+    // Cross-match: ambos os lados confirmados
+    if (ownerId && ownerId !== party.hostUid) {
+      createNotification({
+        userId: ownerId,
+        type: "application_accepted",
+        title: "Confirmado na PT!",
+        body: `Seu convite cruzou com uma candidatura existente — você está confirmado na vaga ${slotIndex + 1}.`,
+        link: NOTIF_LINK,
+        meta: { partyId, slotIndex },
+      });
+    }
+    if (party.hostUid && party.hostUid !== ownerId) {
+      createNotification({
+        userId: party.hostUid,
+        type: "invite_accepted",
+        title: "Convite confirmado (cross-match)",
+        body: `${playerName} já tinha se candidatado — vaga ${slotIndex + 1} fechada.`,
+        link: NOTIF_LINK,
+        meta: { partyId, slotIndex },
+      });
+    }
+  } else if (ownerId && ownerId !== party.hostUid) {
+    // Convite simples → notifica o invitee
+    createNotification({
+      userId: ownerId,
+      type: "invite_received",
+      title: "Convite recebido",
+      body: `${hostName} te convidou pra vaga ${slotIndex + 1}.`,
+      link: NOTIF_LINK,
+      meta: { partyId, slotIndex },
+    });
+  }
 }
 
 /**
@@ -650,6 +726,19 @@ export async function acceptApplication(
     slots: slots.map(serializeSlot),
     updatedAt: serverTimestamp(),
   });
+
+  // Notifica o candidato aceito
+  if (applicant.ownerId && applicant.ownerId !== party.hostUid) {
+    const hostName = party.hostCharacterName ?? "o host";
+    createNotification({
+      userId: applicant.ownerId,
+      type: "application_accepted",
+      title: "Candidatura aceita!",
+      body: `${hostName} aceitou sua candidatura na vaga ${slotIndex + 1}.`,
+      link: NOTIF_LINK,
+      meta: { partyId, slotIndex },
+    });
+  }
 }
 
 /** Invitee aceita convite. */
@@ -679,6 +768,19 @@ export async function acceptInvite(
     slots: slots.map(serializeSlot),
     updatedAt: serverTimestamp(),
   });
+
+  // Notifica o host
+  if (party.hostUid && party.hostUid !== invite.ownerId) {
+    const playerName = invite.characterName ?? "Um player";
+    createNotification({
+      userId: party.hostUid,
+      type: "invite_accepted",
+      title: "Convite aceito",
+      body: `${playerName} aceitou seu convite (vaga ${slotIndex + 1}).`,
+      link: NOTIF_LINK,
+      meta: { partyId, slotIndex },
+    });
+  }
 }
 
 /** Host recusa candidatura. */
@@ -1052,4 +1154,21 @@ export async function closePartyAndLock(partyId: string, party: PrimalParty) {
   });
 
   await batch.commit();
+
+  // Notifica todos os confirmados exceto o host
+  const hostName = party.hostCharacterName ?? "o host";
+  const recipientIds = party.slots
+    .map((s) => s.confirmed?.ownerId)
+    .filter(
+      (uid): uid is string => !!uid && uid !== party.hostUid && !uid.startsWith("dummy_")
+    );
+  if (recipientIds.length > 0) {
+    createNotificationsBulk(recipientIds, {
+      type: "party_closed",
+      title: "PT fechada!",
+      body: `A PT do ${hostName} foi fechada com todos os players confirmados.`,
+      link: NOTIF_LINK,
+      meta: { partyId },
+    });
+  }
 }
