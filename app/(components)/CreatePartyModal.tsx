@@ -60,6 +60,9 @@ export function CreatePartyModal({
     new Set()
   );
   const [reqExperiencedOn, setReqExperiencedOn] = useState(false);
+  const [reqQuestDoneOn, setReqQuestDoneOn] = useState(false);
+  /** true = apenas veteranos; false = apenas iniciantes */
+  const [reqQuestDoneVeterans, setReqQuestDoneVeterans] = useState(true);
 
   const [composition, setComposition] = useState<Vocation[][]>(
     DEFAULT_COMPOSITION.map((v) => [...v])
@@ -170,6 +173,7 @@ export function CreatePartyModal({
       minHazard: { active: reqHazardOn, value: reqHazardValue },
       schedule: { active: reqScheduleOn, value: [...reqScheduleTurnos] },
       experienced: { active: reqExperiencedOn },
+      questDone: { active: reqQuestDoneOn, value: reqQuestDoneVeterans },
     };
 
     setBusy(true);
@@ -497,6 +501,60 @@ export function CreatePartyModal({
                     : "Sem filtro de experiência."
                 }
               />
+
+              {/* Quest done (veteranos vs iniciantes) */}
+              <RequirementBlock
+                active={reqQuestDoneOn}
+                onToggle={() => setReqQuestDoneOn((v) => !v)}
+                icon="🏆"
+                title="Status da quest"
+                hint={
+                  reqQuestDoneOn
+                    ? reqQuestDoneVeterans
+                      ? "Apenas chars que já fizeram a Primal Order."
+                      : "Apenas chars que nunca fizeram a Primal Order."
+                    : "Sem filtro de status da quest (qualquer um pode aplicar)."
+                }
+              >
+                {reqQuestDoneOn && (
+                  <div className="grid grid-cols-2 gap-1.5 mt-2">
+                    <button
+                      type="button"
+                      onClick={() => setReqQuestDoneVeterans(false)}
+                      className={`p-2 rounded border text-center transition ${
+                        !reqQuestDoneVeterans
+                          ? "border-[var(--ok)] bg-[var(--ok)]/10 text-[var(--ok)]"
+                          : "border-[var(--border-strong)] bg-[var(--background)] text-[var(--text-mute)] hover:border-[var(--accent-dim)]"
+                      }`}
+                    >
+                      <div className="text-lg leading-none mb-1">🆕</div>
+                      <div className="text-[11px] font-semibold">
+                        Apenas iniciantes
+                      </div>
+                      <div className="text-[9px] text-[var(--text-dim)]">
+                        nunca fizeram
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setReqQuestDoneVeterans(true)}
+                      className={`p-2 rounded border text-center transition ${
+                        reqQuestDoneVeterans
+                          ? "border-[var(--ok)] bg-[var(--ok)]/10 text-[var(--ok)]"
+                          : "border-[var(--border-strong)] bg-[var(--background)] text-[var(--text-mute)] hover:border-[var(--accent-dim)]"
+                      }`}
+                    >
+                      <div className="text-lg leading-none mb-1">🎖️</div>
+                      <div className="text-[11px] font-semibold">
+                        Apenas veteranos
+                      </div>
+                      <div className="text-[9px] text-[var(--text-dim)]">
+                        já fizeram
+                      </div>
+                    </button>
+                  </div>
+                )}
+              </RequirementBlock>
 
               {/* Schedule */}
               <RequirementBlock

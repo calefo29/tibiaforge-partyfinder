@@ -46,6 +46,8 @@ export function EditPartyModal({ open, party, onClose }: Props) {
   const [reqScheduleOn, setReqScheduleOn] = useState(false);
   const [reqScheduleTurnos, setReqScheduleTurnos] = useState<Set<Turno>>(new Set());
   const [reqExperiencedOn, setReqExperiencedOn] = useState(false);
+  const [reqQuestDoneOn, setReqQuestDoneOn] = useState(false);
+  const [reqQuestDoneVeterans, setReqQuestDoneVeterans] = useState(true);
   const [composition, setComposition] = useState<Vocation[][]>([
     ["EK"], ["ED"], [], [], [],
   ]);
@@ -62,6 +64,8 @@ export function EditPartyModal({ open, party, onClose }: Props) {
     setReqScheduleOn(party.requirements.schedule.active);
     setReqScheduleTurnos(new Set(party.requirements.schedule.value));
     setReqExperiencedOn(party.requirements.experienced?.active ?? false);
+    setReqQuestDoneOn(party.requirements.questDone?.active ?? false);
+    setReqQuestDoneVeterans(party.requirements.questDone?.value ?? true);
     setComposition(party.slots.map((s) => [...s.vocations]));
     setBusy(false);
     setError(null);
@@ -122,6 +126,7 @@ export function EditPartyModal({ open, party, onClose }: Props) {
       minHazard: { active: reqHazardOn, value: reqHazardValue },
       schedule: { active: reqScheduleOn, value: [...reqScheduleTurnos] },
       experienced: { active: reqExperiencedOn },
+      questDone: { active: reqQuestDoneOn, value: reqQuestDoneVeterans },
     };
     setBusy(true);
     try {
@@ -329,6 +334,53 @@ export function EditPartyModal({ open, party, onClose }: Props) {
                     : "Sem filtro de experiência."
                 }
               />
+
+              <RequirementBlock
+                active={reqQuestDoneOn}
+                onToggle={() => setReqQuestDoneOn((v) => !v)}
+                icon="🏆"
+                title="Status da quest"
+                hint={
+                  reqQuestDoneOn
+                    ? reqQuestDoneVeterans
+                      ? "Apenas chars que já fizeram a Primal Order."
+                      : "Apenas chars que nunca fizeram a Primal Order."
+                    : "Sem filtro de status da quest."
+                }
+              >
+                {reqQuestDoneOn && (
+                  <div className="grid grid-cols-2 gap-1.5 mt-2">
+                    <button
+                      type="button"
+                      onClick={() => setReqQuestDoneVeterans(false)}
+                      className={`p-2 rounded border text-center transition ${
+                        !reqQuestDoneVeterans
+                          ? "border-[var(--ok)] bg-[var(--ok)]/10 text-[var(--ok)]"
+                          : "border-[var(--border-strong)] bg-[var(--background)] text-[var(--text-mute)] hover:border-[var(--accent-dim)]"
+                      }`}
+                    >
+                      <div className="text-lg leading-none mb-1">🆕</div>
+                      <div className="text-[11px] font-semibold">
+                        Apenas iniciantes
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setReqQuestDoneVeterans(true)}
+                      className={`p-2 rounded border text-center transition ${
+                        reqQuestDoneVeterans
+                          ? "border-[var(--ok)] bg-[var(--ok)]/10 text-[var(--ok)]"
+                          : "border-[var(--border-strong)] bg-[var(--background)] text-[var(--text-mute)] hover:border-[var(--accent-dim)]"
+                      }`}
+                    >
+                      <div className="text-lg leading-none mb-1">🎖️</div>
+                      <div className="text-[11px] font-semibold">
+                        Apenas veteranos
+                      </div>
+                    </button>
+                  </div>
+                )}
+              </RequirementBlock>
 
               <RequirementBlock
                 active={reqScheduleOn}

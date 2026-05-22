@@ -71,6 +71,13 @@ export type PartyRequirements = {
   minHazard: Requirement<number>;
   schedule: Requirement<Turno[]>;
   experienced: { active: boolean };
+  /**
+   * Quest done filter:
+   * - active=false → sem restrição (qualquer um pode aplicar)
+   * - active=true, value=true → apenas veteranos (chars com questHistory.primal === true)
+   * - active=true, value=false → apenas iniciantes (chars que nunca fizeram)
+   */
+  questDone: Requirement<boolean>;
 };
 
 export const DEFAULT_REQUIREMENTS: PartyRequirements = {
@@ -78,6 +85,7 @@ export const DEFAULT_REQUIREMENTS: PartyRequirements = {
   minHazard: { active: false, value: 0 },
   schedule: { active: false, value: [] },
   experienced: { active: false },
+  questDone: { active: false, value: false },
 };
 
 export type PrimalParty = {
@@ -232,7 +240,6 @@ export function checkCandidateForSlot(
   const slot = party.slots[slotIndex];
   if (!slot) return { ok: false, reason: "Vaga inválida" };
   if (slot.confirmed) return { ok: false, reason: "Vaga já preenchida" };
-  if (cand.questDonePrimal) return { ok: false, reason: "Char já fez Primal" };
   if (party.server && cand.server !== party.server)
     return { ok: false, reason: "Servidor diferente" };
   if (!canVocFillSlot(cand.vocation, slot.vocations))
@@ -260,6 +267,15 @@ export function checkCandidateForSlot(
     if (!cand.inPool) return { ok: false, reason: "Char precisa estar na pool (experiência)" };
     if (cand.hasExperience !== true)
       return { ok: false, reason: "Precisa ter experiência na quest" };
+  }
+
+  if (req.questDone?.active) {
+    if (req.questDone.value === true && !cand.questDonePrimal) {
+      return { ok: false, reason: "PT só pra quem já fez a quest" };
+    }
+    if (req.questDone.value === false && cand.questDonePrimal) {
+      return { ok: false, reason: "PT só pra quem nunca fez a quest" };
+    }
   }
 
   // Char já está como confirmed em alguma vaga dessa PT?
@@ -441,6 +457,7 @@ function mapParty(d: import("firebase/firestore").QueryDocumentSnapshot): Primal
     minHazard: rawReq?.minHazard ?? { active: false, value: 0 },
     schedule: rawReq?.schedule ?? { active: false, value: [] },
     experienced: rawReq?.experienced ?? { active: false },
+    questDone: rawReq?.questDone ?? { active: false, value: false },
   };
   return {
     id: d.id,
