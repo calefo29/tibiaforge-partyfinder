@@ -109,7 +109,7 @@ function PerfilContent() {
 
   return (
     <AppShell>
-      <div className="max-w-[1100px] mx-auto px-8 py-10">
+      <div className="max-w-[1100px] mx-auto px-3 sm:px-6 md:px-8 py-4 md:py-10">
         <div className="flex items-center gap-5 mb-10">
           <div className="w-16 h-16 rounded-full flex items-center justify-center text-2xl font-semibold bg-gradient-to-br from-[var(--accent-dim)] to-[var(--background-elev-2)]">
             {initial}

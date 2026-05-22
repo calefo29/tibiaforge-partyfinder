@@ -247,7 +247,7 @@ export default function PrimalHubPage() {
 
   return (
     <AppShell>
-      <div className="max-w-[1180px] mx-auto px-8 py-8">
+      <div className="max-w-[1180px] mx-auto px-3 sm:px-6 md:px-8 py-4 md:py-8">
         {/* Quest header + tabs */}
         <div className="bg-gradient-to-br from-[var(--accent)]/8 to-[var(--accent)]/0 border border-[var(--border)] rounded-xl p-6 mb-6">
           <div className="flex items-start justify-between gap-6 flex-wrap mb-5">

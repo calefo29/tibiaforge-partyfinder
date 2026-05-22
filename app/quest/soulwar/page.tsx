@@ -23,7 +23,7 @@ export default function SoulwarHubPage() {
 
   return (
     <AppShell>
-      <div className="max-w-[1180px] mx-auto px-8 py-8">
+      <div className="max-w-[1180px] mx-auto px-3 sm:px-6 md:px-8 py-4 md:py-8">
         <div className="bg-gradient-to-br from-[var(--accent)]/8 to-[var(--accent)]/0 border border-[var(--border)] rounded-xl p-6 mb-6">
           <h1 className="text-2xl font-semibold tracking-tight">Soulwar</h1>
           <p className="text-sm text-[var(--text-mute)] mt-1">
