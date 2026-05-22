@@ -22,6 +22,7 @@ import {
   nextServerSave,
   SuggestionStatus,
 } from "@/lib/primal-suggestions";
+import { createNotificationsBulk } from "@/lib/notifications";
 
 // Vercel Cron entrega GET com Authorization: Bearer <CRON_SECRET>
 export async function GET(req: NextRequest) {
@@ -122,7 +123,7 @@ export async function GET(req: NextRequest) {
 
     for (const slots of partitions) {
       const meta = computePartitionMeta(slots);
-      await addDoc(collection(db, "primalSuggestions"), {
+      const ref = await addDoc(collection(db, "primalSuggestions"), {
         cycleDate,
         server,
         slots,
@@ -135,6 +136,23 @@ export async function GET(req: NextRequest) {
         createdAt: serverTimestamp(),
         expiresAt: Timestamp.fromDate(expiresAt),
       });
+
+      // Notifica os 5 players sorteados — uma notif por owner.
+      const ownerIds = slots
+        .map((s) => s.ownerId)
+        .filter(
+          (uid): uid is string =>
+            !!uid && !uid.startsWith("dummy_")
+        );
+      if (ownerIds.length > 0) {
+        await createNotificationsBulk(ownerIds, {
+          type: "suggestion_new",
+          title: "PT aleatória formada!",
+          body: `Você foi sorteado pra uma PT no ${server}. Avalie e aceite/recuse até o próximo SS.`,
+          link: "/quest/primal",
+          meta: { suggestionId: ref.id, server },
+        });
+      }
     }
     createdSuggestions.push({ server, count: partitions.length });
   }
