@@ -40,6 +40,10 @@ import {
 } from "@/app/(components)/PartyListFilters";
 import { NotificationBell } from "@/app/(components)/NotificationBell";
 import { useUserNotifications } from "@/lib/use-user-notifications";
+import {
+  ScopeMode,
+  SimpleFilters,
+} from "@/app/(components)/SimpleFilters";
 import type { Vocation } from "@/lib/characters";
 
 const VOC_COLORS: Record<string, string> = {
@@ -219,6 +223,17 @@ export default function PrimalHubPage() {
   const [partyFilters, setPartyFilters] =
     useState<PartyFiltersState>(EMPTY_PARTY_FILTERS);
 
+  // Filtros simples — pool, PTs criadas, Minhas PTs
+  const [poolSearch, setPoolSearch] = useState("");
+  const [poolServerFilter, setPoolServerFilter] = useState("");
+
+  const [ptsCriadasSearch, setPtsCriadasSearch] = useState("");
+  const [ptsCriadasServerFilter, setPtsCriadasServerFilter] = useState("");
+  const [ptsCriadasScope, setPtsCriadasScope] = useState<ScopeMode>("all");
+
+  const [minhasSearch, setMinhasSearch] = useState("");
+  const [minhasServerFilter, setMinhasServerFilter] = useState("");
+
   const availableServers = useMemo(() => {
     const set = new Set<string>();
     othersFormingParties.forEach((p) => {
@@ -275,6 +290,115 @@ export default function PrimalHubPage() {
 
   const ptsCriadasCount = allParties?.length ?? 0;
   const minhasPtsCount = myClosedParties.length;
+
+  // ── Filtragem do POOL (Add Personagem) ────────────────────────────────
+  const poolAvailableServers = useMemo(() => {
+    const set = new Set<string>();
+    (pool ?? []).forEach((e) => {
+      if (e.server) set.add(e.server);
+    });
+    return Array.from(set).sort();
+  }, [pool]);
+
+  const filteredPool = useMemo(() => {
+    const q = poolSearch.trim().toLowerCase();
+    return (pool ?? []).filter((e) => {
+      if (poolServerFilter && e.server !== poolServerFilter) return false;
+      if (q) {
+        const ch = charsById.get(e.characterId);
+        const name = (ch?.name ?? e.characterName ?? "").toLowerCase();
+        if (!name.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [pool, charsById, poolSearch, poolServerFilter]);
+
+  // ── Filtragem das "Minhas PTs" (closed) ───────────────────────────────
+  const minhasAvailableServers = useMemo(() => {
+    const set = new Set<string>();
+    myClosedParties.forEach((p) => {
+      if (p.server) set.add(p.server);
+    });
+    return Array.from(set).sort();
+  }, [myClosedParties]);
+
+  const filteredMinhasPts = useMemo(() => {
+    const q = minhasSearch.trim().toLowerCase();
+    return myClosedParties.filter((p) => {
+      if (minhasServerFilter && p.server !== minhasServerFilter) return false;
+      if (q) {
+        // Busca em todos os chars confirmed + host
+        const names: string[] = [];
+        if (p.hostCharacterName) names.push(p.hostCharacterName.toLowerCase());
+        p.slots.forEach((s) => {
+          if (s.confirmed?.characterName) {
+            names.push(s.confirmed.characterName.toLowerCase());
+          }
+        });
+        if (!names.some((n) => n.includes(q))) return false;
+      }
+      return true;
+    });
+  }, [myClosedParties, minhasSearch, minhasServerFilter]);
+
+  // ── Filtragem da aba "PTs criadas" ────────────────────────────────────
+  const ptsCriadasAvailableServers = useMemo(() => {
+    const set = new Set<string>();
+    (allParties ?? []).forEach((p) => {
+      if (p.server) set.add(p.server);
+    });
+    return Array.from(set).sort();
+  }, [allParties]);
+
+  const applyPtsCriadasFilters = (parties: PrimalParty[]) => {
+    const q = ptsCriadasSearch.trim().toLowerCase();
+    return parties.filter((p) => {
+      if (ptsCriadasServerFilter && p.server !== ptsCriadasServerFilter)
+        return false;
+      if (q) {
+        const names: string[] = [];
+        if (p.hostCharacterName) names.push(p.hostCharacterName.toLowerCase());
+        p.slots.forEach((s) => {
+          if (s.confirmed?.characterName) {
+            names.push(s.confirmed.characterName.toLowerCase());
+          }
+        });
+        if (!names.some((n) => n.includes(q))) return false;
+      }
+      return true;
+    });
+  };
+
+  const filteredMyFormingForList = useMemo(() => {
+    if (ptsCriadasScope === "accepted") return [] as PrimalParty[]; // outra seção
+    return applyPtsCriadasFilters(myFormingParties);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [myFormingParties, ptsCriadasSearch, ptsCriadasServerFilter, ptsCriadasScope]);
+
+  const filteredOthersForList = useMemo(() => {
+    if (ptsCriadasScope === "host") return [] as PrimalParty[];
+    // Aplica filtros básicos
+    let list = applyPtsCriadasFilters(filteredOthersFormingParties);
+    // Se modo "accepted", restringe ao subset onde tenho char confirmed
+    if (ptsCriadasScope === "accepted") {
+      list = list.filter((p) =>
+        p.slots.some((s) => s.confirmed?.ownerId === myUid)
+      );
+    }
+    return list;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    filteredOthersFormingParties,
+    ptsCriadasSearch,
+    ptsCriadasServerFilter,
+    ptsCriadasScope,
+    myUid,
+  ]);
+
+  const ptsCriadasTotalCount =
+    myFormingParties.length + othersFormingParties.length;
+  const ptsCriadasFilteredCount =
+    filteredMyFormingForList.length + filteredOthersForList.length;
 
   const myCharIdSet = useMemo(() => new Set(myCharIds), [myCharIds]);
   const sugestaoCount = useMemo(
@@ -455,38 +579,53 @@ export default function PrimalHubPage() {
               </div>
             ) : (
               <>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-                  {pool.map((entry) => {
-                    const ch = charsById.get(entry.characterId);
-                    if (!ch) {
-                      return (
-                        <div
-                          key={entry.id}
-                          className="bg-[var(--background-elev)] border border-[var(--border)] rounded-lg p-4 text-sm text-[var(--text-mute)]"
-                        >
-                          Personagem removido — esta inscrição pode ser excluída.
-                          <button
-                            type="button"
-                            onClick={() => handleRemove(entry.id)}
-                            className="block mt-2 text-xs text-[var(--danger)] hover:underline"
+                <SimpleFilters
+                  searchValue={poolSearch}
+                  onSearchChange={setPoolSearch}
+                  serverValue={poolServerFilter}
+                  onServerChange={setPoolServerFilter}
+                  availableServers={poolAvailableServers}
+                  totalCount={pool.length}
+                  filteredCount={filteredPool.length}
+                />
+                {filteredPool.length === 0 ? (
+                  <div className="border border-dashed border-[var(--border-strong)] rounded-lg p-6 text-center text-sm text-[var(--text-mute)]">
+                    Nenhum char bate com os filtros atuais.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                    {filteredPool.map((entry) => {
+                      const ch = charsById.get(entry.characterId);
+                      if (!ch) {
+                        return (
+                          <div
+                            key={entry.id}
+                            className="bg-[var(--background-elev)] border border-[var(--border)] rounded-lg p-4 text-sm text-[var(--text-mute)]"
                           >
-                            Remover da pool
-                          </button>
-                        </div>
+                            Personagem removido — esta inscrição pode ser excluída.
+                            <button
+                              type="button"
+                              onClick={() => handleRemove(entry.id)}
+                              className="block mt-2 text-xs text-[var(--danger)] hover:underline"
+                            >
+                              Remover da pool
+                            </button>
+                          </div>
+                        );
+                      }
+                      return (
+                        <PoolCard
+                          key={entry.id}
+                          entry={entry}
+                          ch={ch}
+                          removing={removingId === entry.id}
+                          onEdit={() => openEdit(entry)}
+                          onRemove={() => handleRemove(entry.id)}
+                        />
                       );
-                    }
-                    return (
-                      <PoolCard
-                        key={entry.id}
-                        entry={entry}
-                        ch={ch}
-                        removing={removingId === entry.id}
-                        onEdit={() => openEdit(entry)}
-                        onRemove={() => handleRemove(entry.id)}
-                      />
-                    );
-                  })}
-                </div>
+                    })}
+                  </div>
+                )}
 
                 <div className="mt-6">
                   <PoolStatsCard
@@ -519,13 +658,27 @@ export default function PrimalHubPage() {
               </button>
             </div>
 
-            {/* Minhas PTs criadas */}
+            {/* Filtros básicos da aba PTs criadas */}
+            <SimpleFilters
+              searchValue={ptsCriadasSearch}
+              onSearchChange={setPtsCriadasSearch}
+              serverValue={ptsCriadasServerFilter}
+              onServerChange={setPtsCriadasServerFilter}
+              availableServers={ptsCriadasAvailableServers}
+              scope={ptsCriadasScope}
+              onScopeChange={setPtsCriadasScope}
+              totalCount={ptsCriadasTotalCount}
+              filteredCount={ptsCriadasFilteredCount}
+            />
+
+            {/* Minhas PTs criadas — escondida no modo "accepted" */}
+            {ptsCriadasScope !== "accepted" && (
             <div className="bg-[var(--accent)]/4 border border-[var(--accent)]/25 rounded-xl p-4">
               <div className="flex items-center justify-between gap-2 mb-3 pb-3 border-b border-[var(--accent)]/20">
                 <h3 className="text-base font-bold text-[var(--accent)] flex items-center gap-2">
                   <span>🛡️ Minhas PTs criadas</span>
                   <span className="text-[11px] font-bold text-[#04122a] bg-[var(--accent)] px-2 py-0.5 rounded-full">
-                    {myFormingParties.length}
+                    {filteredMyFormingForList.length}
                   </span>
                 </h3>
                 <span className="text-[10px] uppercase tracking-wider text-[var(--accent)]/80 font-semibold">
@@ -542,9 +695,13 @@ export default function PrimalHubPage() {
                   <strong className="text-[var(--text)]">+ Criar nova PT</strong>{" "}
                   pra começar.
                 </div>
+              ) : filteredMyFormingForList.length === 0 ? (
+                <div className="border border-dashed border-[var(--border-strong)] rounded-lg p-6 text-center text-sm text-[var(--text-mute)]">
+                  Nenhuma das suas PTs bate com os filtros.
+                </div>
               ) : (
                 <div className="space-y-3.5">
-                  {myFormingParties.map((p) => (
+                  {filteredMyFormingForList.map((p) => (
                     <PartyCard
                       key={p.id}
                       party={p}
@@ -561,30 +718,40 @@ export default function PrimalHubPage() {
                 </div>
               )}
             </div>
+            )}
 
-            {/* Divisor */}
-            <div className="flex items-center gap-3 my-2">
-              <div className="flex-1 h-px bg-gradient-to-r from-transparent via-[var(--border-strong)] to-transparent"></div>
-              <span className="text-[10px] uppercase tracking-[0.2em] text-[var(--text-dim)] font-semibold">
-                · · ·
-              </span>
-              <div className="flex-1 h-px bg-gradient-to-r from-transparent via-[var(--border-strong)] to-transparent"></div>
-            </div>
+            {/* Divisor — escondido no modo "host" ou "accepted" */}
+            {ptsCriadasScope === "all" && (
+              <div className="flex items-center gap-3 my-2">
+                <div className="flex-1 h-px bg-gradient-to-r from-transparent via-[var(--border-strong)] to-transparent"></div>
+                <span className="text-[10px] uppercase tracking-[0.2em] text-[var(--text-dim)] font-semibold">
+                  · · ·
+                </span>
+                <div className="flex-1 h-px bg-gradient-to-r from-transparent via-[var(--border-strong)] to-transparent"></div>
+              </div>
+            )}
 
-            {/* Outras PTs */}
+            {/* Outras PTs — escondida no modo "host" */}
+            {ptsCriadasScope !== "host" && (
             <div>
               <div className="flex items-center justify-between gap-2 mb-3 pb-2 border-b border-[var(--border)]">
                 <h3 className="text-base font-bold text-[var(--text)] flex items-center gap-2">
-                  <span>⚔️ Outras PTs abertas</span>
+                  <span>
+                    {ptsCriadasScope === "accepted"
+                      ? "✅ PTs onde fui aceito"
+                      : "⚔️ Outras PTs abertas"}
+                  </span>
                   <span className="text-[11px] font-bold text-[var(--text-mute)] bg-[var(--background-elev-2)] px-2 py-0.5 rounded-full border border-[var(--border-strong)]">
-                    {othersFormingParties.length}
+                    {filteredOthersForList.length}
                   </span>
                 </h3>
                 <span className="text-[10px] uppercase tracking-wider text-[var(--text-mute)] font-semibold">
-                  Candidate seu char
+                  {ptsCriadasScope === "accepted"
+                    ? "Você já está dentro"
+                    : "Candidate seu char"}
                 </span>
               </div>
-              {othersFormingParties.length > 0 && (
+              {othersFormingParties.length > 0 && ptsCriadasScope === "all" && (
                 <PartyListFilters
                   value={partyFilters}
                   onChange={setPartyFilters}
@@ -601,14 +768,15 @@ export default function PrimalHubPage() {
                 <div className="border border-dashed border-[var(--border-strong)] rounded-lg p-6 text-center text-sm text-[var(--text-mute)]">
                   Nenhuma PT de outros players aberta no momento.
                 </div>
-              ) : filteredOthersFormingParties.length === 0 ? (
+              ) : filteredOthersForList.length === 0 ? (
                 <div className="border border-dashed border-[var(--border-strong)] rounded-lg p-6 text-center text-sm text-[var(--text-mute)]">
-                  Nenhuma PT bate com os filtros atuais. Limpa os filtros pra ver
-                  tudo.
+                  {ptsCriadasScope === "accepted"
+                    ? "Você ainda não foi aceito em nenhuma PT de outros."
+                    : "Nenhuma PT bate com os filtros atuais."}
                 </div>
               ) : (
                 <div className="space-y-3.5">
-                  {filteredOthersFormingParties.map((p) => (
+                  {filteredOthersForList.map((p) => (
                     <PartyCard
                       key={p.id}
                       party={p}
@@ -624,6 +792,7 @@ export default function PrimalHubPage() {
                 </div>
               )}
             </div>
+            )}
           </section>
         )}
 
@@ -663,20 +832,37 @@ export default function PrimalHubPage() {
                 </p>
               </div>
             ) : (
-              <div className="space-y-3.5">
-                {myClosedParties.map((p) => (
-                  <PartyCard
-                    key={p.id}
-                    party={p}
-                    myUid={myUid}
-                    myChars={chars ?? []}
-                    myPoolByCharId={myPoolByCharId}
-                    allPool={allPool ?? []}
-                    charById={charsById}
-                    hostChar={charsById.get(p.hostCharacterId) ?? null}
-                  />
-                ))}
-              </div>
+              <>
+                <SimpleFilters
+                  searchValue={minhasSearch}
+                  onSearchChange={setMinhasSearch}
+                  serverValue={minhasServerFilter}
+                  onServerChange={setMinhasServerFilter}
+                  availableServers={minhasAvailableServers}
+                  totalCount={myClosedParties.length}
+                  filteredCount={filteredMinhasPts.length}
+                />
+                {filteredMinhasPts.length === 0 ? (
+                  <div className="border border-dashed border-[var(--border-strong)] rounded-lg p-6 text-center text-sm text-[var(--text-mute)]">
+                    Nenhuma PT bate com os filtros atuais.
+                  </div>
+                ) : (
+                  <div className="space-y-3.5">
+                    {filteredMinhasPts.map((p) => (
+                      <PartyCard
+                        key={p.id}
+                        party={p}
+                        myUid={myUid}
+                        myChars={chars ?? []}
+                        myPoolByCharId={myPoolByCharId}
+                        allPool={allPool ?? []}
+                        charById={charsById}
+                        hostChar={charsById.get(p.hostCharacterId) ?? null}
+                      />
+                    ))}
+                  </div>
+                )}
+              </>
             )}
           </section>
         )}
