@@ -333,8 +333,8 @@ function GroupSection({
           {cycle}
         </span>
       </h2>
-      {/* 2 colunas (1 no mobile) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      {/* 3 colunas no desktop, 2 no tablet, 1 no mobile */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         {resps.map((resp) => (
           <RespCard key={resp.id} resp={resp} />
         ))}
@@ -362,13 +362,15 @@ function RespCard({ resp }: { resp: HuntResp }) {
         )}
         <div className="text-xs font-semibold text-center">{resp.name}</div>
       </div>
-      <div className="space-y-1">
+      {/* Horários em 2 colunas, formato 🕐 HH:MM - HH:MM */}
+      <div className="grid grid-cols-2 gap-1.5">
         {HUNT_SLOT_HOURS.map((hour) => (
           <div
             key={hour}
-            className="flex items-center justify-center text-[11px] text-[var(--text-mute)] py-1 px-2 bg-[var(--background)]/40 rounded"
+            className="flex items-center gap-1 text-[11px] text-[var(--text-mute)] py-1 px-2 bg-[var(--background)]/40 border border-[var(--border)]/60 rounded"
           >
-            {formatSlot(hour)}
+            <span className="text-[var(--text-dim)]">🕐</span>
+            <span>{formatSlot(hour)}</span>
           </div>
         ))}
       </div>
