@@ -55,6 +55,9 @@ export function HuntPartyModal({ open, ownerId, onClose, onSuccess }: Props) {
   );
   /** Índice do slot atualmente sendo preenchido (abre o picker inline). */
   const [pickingSlot, setPickingSlot] = useState<number | null>(null);
+  /** Picker do líder aberto? */
+  const [pickingLeader, setPickingLeader] = useState(false);
+  const [leaderSearch, setLeaderSearch] = useState("");
   const [search, setSearch] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -71,6 +74,8 @@ export function HuntPartyModal({ open, ownerId, onClose, onSuccess }: Props) {
       setLeaderCharId(null);
       setOtherSlots(Array(SLOT_COUNT - 1).fill(null));
       setPickingSlot(null);
+      setPickingLeader(false);
+      setLeaderSearch("");
       setSearch("");
       setError(null);
       setBusy(false);
@@ -85,6 +90,9 @@ export function HuntPartyModal({ open, ownerId, onClose, onSuccess }: Props) {
       if (pickingSlot !== null) {
         setPickingSlot(null);
         setSearch("");
+      } else if (pickingLeader) {
+        setPickingLeader(false);
+        setLeaderSearch("");
       } else {
         onClose();
       }
@@ -179,6 +187,8 @@ export function HuntPartyModal({ open, ownerId, onClose, onSuccess }: Props) {
     }
     setLeaderCharId(charId);
     setPickingSlot(null);
+    setPickingLeader(false);
+    setLeaderSearch("");
     setSearch("");
   };
 
@@ -275,70 +285,150 @@ export function HuntPartyModal({ open, ownerId, onClose, onSuccess }: Props) {
 
         {/* Body */}
         <div className="p-5 space-y-5">
-          {/* Step 1 — escolher líder */}
+          {/* Step 1 — escolher líder (compacto, expande inline) */}
           <section>
             <label className="block text-xs uppercase tracking-wider text-[var(--text-dim)] mb-2">
               1. Seu char líder *
             </label>
-            <p className="text-[11px] text-[var(--text-mute)] mb-3">
-              O servidor da PT vem do char líder. Convidados precisam estar no
-              mesmo servidor.
-            </p>
 
             {myChars === null ? (
               <p className="text-xs text-[var(--text-mute)] py-3 text-center">
                 Carregando seus chars...
               </p>
             ) : myChars.length === 0 ? (
-              <div className="border border-dashed border-[var(--border-strong)] rounded-lg p-6 text-center text-sm text-[var(--text-mute)]">
+              <div className="border border-dashed border-[var(--border-strong)] rounded-lg p-4 text-center text-xs text-[var(--text-mute)]">
                 Você ainda não tem nenhum personagem cadastrado. Vá em{" "}
                 <em>Meus personagens</em> e cadastre primeiro.
               </div>
             ) : (
-              <div className="space-y-2">
-                {myChars.map((c) => {
-                  const selected = c.id === leaderCharId;
-                  const vocColor =
-                    VOC_COLORS[c.vocation] ?? "text-[var(--text-mute)]";
-                  return (
-                    <button
-                      type="button"
-                      key={c.id}
-                      onClick={() => selectLeader(c.id)}
-                      className={`w-full flex items-center gap-3 p-3 rounded-lg border-[1.5px] text-left transition ${
-                        selected
-                          ? "border-[var(--accent)] bg-[var(--accent)]/6"
-                          : "border-[var(--border-strong)] bg-[var(--background)] hover:border-[var(--accent-dim)] hover:bg-[var(--background-elev-2)]"
+              <>
+                {/* Linha compacta clicável */}
+                {leaderChar && !pickingLeader ? (
+                  <div
+                    className={`flex items-center gap-3 px-3 py-2.5 bg-[var(--background)] border rounded-md text-sm ${
+                      pickingLeader
+                        ? "border-[var(--accent)]/40"
+                        : "border-[var(--border-strong)]"
+                    }`}
+                  >
+                    <span
+                      className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border border-[var(--border-strong)] bg-[var(--background-elev-2)] ${
+                        VOC_COLORS[leaderChar.vocation] ??
+                        "text-[var(--text-mute)]"
                       }`}
                     >
-                      <span
-                        className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border border-[var(--border-strong)] bg-[var(--background-elev-2)] ${vocColor}`}
-                      >
-                        {c.vocation}
-                      </span>
-                      <span className="flex-1 min-w-0">
-                        <span className="block text-sm font-semibold truncate">
-                          {c.name}
-                        </span>
-                        <span className="block text-[11px] text-[var(--text-mute)]">
-                          Level {c.level} · {c.server}
-                        </span>
-                      </span>
-                      <span
-                        className={`w-[18px] h-[18px] rounded-full border-2 flex-shrink-0 relative ${
-                          selected
-                            ? "border-[var(--accent)]"
-                            : "border-[var(--border-strong)]"
-                        }`}
-                      >
-                        {selected && (
-                          <span className="absolute inset-[3px] rounded-full bg-[var(--accent)]" />
-                        )}
-                      </span>
+                      {leaderChar.vocation}
+                    </span>
+                    <span className="flex-1 truncate font-medium">
+                      {leaderChar.name}
+                    </span>
+                    <span className="text-[var(--text-mute)] text-xs">
+                      lvl {leaderChar.level}
+                    </span>
+                    <span className="text-[var(--text-dim)] text-[10px] uppercase">
+                      {leaderChar.server}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPickingLeader(true);
+                        setLeaderSearch("");
+                      }}
+                      className="text-[var(--text-mute)] hover:text-[var(--accent)] text-xs px-1.5"
+                      aria-label="Trocar líder"
+                    >
+                      trocar
                     </button>
-                  );
-                })}
-              </div>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPickingLeader(true);
+                      setLeaderSearch("");
+                    }}
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 border-2 border-dashed rounded-md text-sm transition ${
+                      pickingLeader
+                        ? "border-[var(--accent)] bg-[var(--accent)]/5"
+                        : "border-[var(--border-strong)] text-[var(--text-mute)] hover:border-[var(--accent-dim)] hover:text-[var(--text)]"
+                    }`}
+                  >
+                    <span className="flex-1 text-left">
+                      {pickingLeader
+                        ? "Escolha um char abaixo..."
+                        : "+ Selecionar meu char líder"}
+                    </span>
+                  </button>
+                )}
+
+                {/* Picker inline */}
+                {pickingLeader && (
+                  <div className="mt-2 border border-[var(--accent)]/40 rounded-md bg-[var(--background)]/60 p-3">
+                    <div className="flex items-center gap-2 mb-2">
+                      <input
+                        autoFocus
+                        type="text"
+                        value={leaderSearch}
+                        onChange={(e) => setLeaderSearch(e.target.value)}
+                        placeholder="🔍 Buscar char por nome..."
+                        className="flex-1 bg-[var(--background)] border border-[var(--border-strong)] focus:border-[var(--accent)] rounded-md px-3 py-1.5 text-sm outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPickingLeader(false);
+                          setLeaderSearch("");
+                        }}
+                        className="text-xs text-[var(--text-mute)] hover:text-[var(--text)] px-2"
+                      >
+                        cancelar
+                      </button>
+                    </div>
+
+                    <div className="max-h-60 overflow-y-auto divide-y divide-[var(--border)]">
+                      {myChars
+                        .filter((c) =>
+                          leaderSearch.trim()
+                            ? c.name
+                                .toLowerCase()
+                                .includes(leaderSearch.trim().toLowerCase())
+                            : true
+                        )
+                        .map((c) => {
+                          const selected = c.id === leaderCharId;
+                          return (
+                            <button
+                              key={c.id}
+                              type="button"
+                              onClick={() => selectLeader(c.id)}
+                              className={`w-full text-left flex items-center gap-3 px-2 py-1.5 text-sm rounded transition ${
+                                selected
+                                  ? "bg-[var(--accent)]/10"
+                                  : "hover:bg-[var(--background-elev-2)]"
+                              }`}
+                            >
+                              <span
+                                className={`font-semibold w-8 ${
+                                  VOC_COLORS[c.vocation] ??
+                                  "text-[var(--text-mute)]"
+                                }`}
+                              >
+                                {c.vocation}
+                              </span>
+                              <span className="flex-1 truncate">{c.name}</span>
+                              <span className="text-[var(--text-mute)] text-xs">
+                                lvl {c.level}
+                              </span>
+                              <span className="text-[var(--text-dim)] text-[10px] uppercase">
+                                {c.server}
+                              </span>
+                            </button>
+                          );
+                        })}
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </section>
 
