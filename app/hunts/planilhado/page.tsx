@@ -7,7 +7,11 @@ import { AppShell } from "@/app/(components)/AppShell";
 import { HuntPartyModal } from "@/app/(components)/HuntPartyModal";
 import {
   HuntParty,
+  HuntPartyMember,
+  createHuntParty,
   deleteHuntParty,
+  fetchAllCharactersOnce,
+  HUNT_PARTY_MIN_SIZE,
   subscribeToAllHuntParties,
 } from "@/lib/hunts";
 import {
@@ -17,6 +21,7 @@ import {
   HUNT_SLOT_HOURS,
   HuntResp,
   HuntRespGroup,
+  creatureSpriteUrl,
   formatSlot,
 } from "@/lib/hunt-resps";
 
@@ -39,8 +44,12 @@ export default function PlanilhadoPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  /** Toggle "Só as que eu faço parte". Default false = mostra todas. */
   const [onlyMine, setOnlyMine] = useState(false);
+  const [seedingDev, setSeedingDev] = useState(false);
+  const [seedError, setSeedError] = useState<string | null>(null);
+
+  const adminUid = process.env.NEXT_PUBLIC_ADMIN_UID ?? "";
+  const isAdmin = !!user && user.uid === adminUid;
 
   useEffect(() => {
     if (!loading && !user) router.replace("/login");
@@ -66,9 +75,55 @@ export default function PlanilhadoPage() {
   };
 
   /**
-   * Toggle "Só as que eu faço parte" considera tanto PTs onde sou owner quanto
-   * PTs em que algum char meu está na composição (member.ownerId === user.uid).
+   * DEV: cria 1 PT de teste com 5 chars random de Auroria, owners distintos.
+   * Útil pra simular volume sem clicar slot por slot. OwnerId é o do primeiro char
+   * sorteado, pra que a PT tenha um "dono" coerente.
    */
+  const handleSeedRandomParty = async () => {
+    setSeedError(null);
+    setSeedingDev(true);
+    try {
+      const allChars = await fetchAllCharactersOnce();
+      const auroria = allChars.filter((c) => c.server === "Auroria");
+      if (auroria.length < HUNT_PARTY_MIN_SIZE) {
+        throw new Error(
+          `Só ${auroria.length} chars em Auroria. Precisa de ao menos ${HUNT_PARTY_MIN_SIZE} de owners diferentes.`
+        );
+      }
+      // Embaralha e pega 1 char por owner até completar a PT
+      const shuffled = [...auroria].sort(() => Math.random() - 0.5);
+      const picked: typeof auroria = [];
+      const seenOwners = new Set<string>();
+      for (const c of shuffled) {
+        if (seenOwners.has(c.ownerId)) continue;
+        picked.push(c);
+        seenOwners.add(c.ownerId);
+        if (picked.length >= HUNT_PARTY_MIN_SIZE) break;
+      }
+      if (picked.length < HUNT_PARTY_MIN_SIZE) {
+        throw new Error(
+          `Auroria só tem ${picked.length} owners distintos. Cadastre chars de mais players.`
+        );
+      }
+      const members: HuntPartyMember[] = picked.map((c) => ({
+        characterId: c.id,
+        ownerId: c.ownerId,
+        name: c.name,
+        vocation: c.vocation,
+        level: c.level,
+      }));
+      await createHuntParty(picked[0].ownerId, {
+        server: "Auroria",
+        members,
+      });
+    } catch (err) {
+      console.error("[seedDev]", err);
+      setSeedError(err instanceof Error ? err.message : "Erro desconhecido");
+    } finally {
+      setSeedingDev(false);
+    }
+  };
+
   const visibleParties = useMemo(() => {
     if (!allParties || !user) return allParties;
     if (!onlyMine) return allParties;
@@ -101,7 +156,6 @@ export default function PlanilhadoPage() {
   return (
     <AppShell>
       <div className="px-3 sm:px-6 md:px-8 py-4 md:py-8 max-w-7xl mx-auto space-y-6">
-        {/* Header */}
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2">
             📅 Planilhado de Hunts
@@ -111,12 +165,8 @@ export default function PlanilhadoPage() {
           </p>
         </div>
 
-        {/* Tabs */}
         <div className="flex gap-1 border-b border-[var(--border)] overflow-x-auto">
-          <TabButton
-            active={tab === "calendario"}
-            onClick={() => setTab("calendario")}
-          >
+          <TabButton active={tab === "calendario"} onClick={() => setTab("calendario")}>
             Calendário
           </TabButton>
           <TabButton
@@ -135,7 +185,6 @@ export default function PlanilhadoPage() {
           </TabButton>
         </div>
 
-        {/* Tab content */}
         {tab === "calendario" && (
           <CalendarioView search={search} setSearch={setSearch} />
         )}
@@ -150,6 +199,10 @@ export default function PlanilhadoPage() {
             onCreate={() => setModalOpen(true)}
             onDelete={handleDelete}
             deletingId={deletingId}
+            isAdmin={isAdmin}
+            onSeedRandom={handleSeedRandomParty}
+            seeding={seedingDev}
+            seedError={seedError}
           />
         )}
         {tab === "ranking" && (
@@ -263,17 +316,25 @@ function GroupSection({
   group: HuntRespGroup;
   resps: HuntResp[];
 }) {
+  const cycle = resps[0]?.cycle ?? "semanal";
+  const isQuinzenal = cycle === "quinzenal";
+
   return (
     <div>
       <h2 className="text-sm uppercase tracking-wider text-[var(--text-dim)] border-b border-[var(--border)] pb-1.5 mb-3 flex items-center gap-2">
         {HUNT_GROUP_LABELS[group]}
-        {group === "rotten-blood" && (
-          <span className="text-[10px] normal-case bg-[var(--accent-dim)]/30 text-[var(--accent)] px-1.5 py-0.5 rounded-full">
-            2 semanas
-          </span>
-        )}
+        <span
+          className={`text-[10px] normal-case px-1.5 py-0.5 rounded-full border ${
+            isQuinzenal
+              ? "bg-[var(--accent-dim)]/30 text-[var(--accent)] border-[var(--accent)]/40"
+              : "bg-[var(--background-elev-2)] text-[var(--text-mute)] border-[var(--border-strong)]"
+          }`}
+        >
+          {cycle}
+        </span>
       </h2>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+      {/* 2 colunas (1 no mobile) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {resps.map((resp) => (
           <RespCard key={resp.id} resp={resp} />
         ))}
@@ -285,8 +346,21 @@ function GroupSection({
 function RespCard({ resp }: { resp: HuntResp }) {
   return (
     <div className="bg-[var(--background-elev)] border border-[var(--border)] rounded-lg p-3.5">
-      <div className="text-center mb-3">
-        <div className="text-xs font-semibold">{resp.name}</div>
+      <div className="flex flex-col items-center mb-3">
+        {resp.creatureAssetId && (
+          <div className="w-16 h-16 flex items-center justify-center mb-1.5 bg-[var(--background)]/40 rounded-md overflow-hidden">
+            <img
+              src={creatureSpriteUrl(resp.creatureAssetId)}
+              alt={resp.name}
+              className="max-w-full max-h-full object-contain"
+              loading="lazy"
+              onError={(e) => {
+                (e.target as HTMLImageElement).style.display = "none";
+              }}
+            />
+          </div>
+        )}
+        <div className="text-xs font-semibold text-center">{resp.name}</div>
       </div>
       <div className="space-y-1">
         {HUNT_SLOT_HOURS.map((hour) => (
@@ -317,6 +391,10 @@ function PartiesView({
   onCreate,
   onDelete,
   deletingId,
+  isAdmin,
+  onSeedRandom,
+  seeding,
+  seedError,
 }: {
   parties: HuntParty[] | null;
   myParticipationCount: number;
@@ -327,18 +405,35 @@ function PartiesView({
   onCreate: () => void;
   onDelete: (id: string) => void;
   deletingId: string | null;
+  isAdmin: boolean;
+  onSeedRandom: () => void;
+  seeding: boolean;
+  seedError: string | null;
 }) {
   return (
     <div className="space-y-4">
-      {/* Botão + toggle */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <button
-          type="button"
-          onClick={onCreate}
-          className="bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-[#04122a] font-semibold px-4 py-2 rounded-md text-sm transition self-start sm:self-auto"
-        >
-          + Registrar PT
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={onCreate}
+            className="bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-[#04122a] font-semibold px-4 py-2 rounded-md text-sm transition"
+          >
+            + Registrar PT
+          </button>
+
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={onSeedRandom}
+              disabled={seeding}
+              title="DEV: gera 1 PT com 5 chars random de Auroria"
+              className="bg-amber-500/15 hover:bg-amber-500/25 text-amber-400 border border-amber-400/40 px-3 py-2 rounded-md text-sm transition disabled:opacity-50"
+            >
+              {seeding ? "Gerando..." : "🎲 PT teste (Auroria)"}
+            </button>
+          )}
+        </div>
 
         <label className="inline-flex items-center gap-2 cursor-pointer select-none">
           <input
@@ -358,7 +453,12 @@ function PartiesView({
         </label>
       </div>
 
-      {/* Lista */}
+      {seedError && (
+        <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-sm rounded-md px-3 py-2">
+          {seedError}
+        </div>
+      )}
+
       {parties === null ? (
         <p className="text-center py-12 text-sm text-[var(--text-mute)]">
           Carregando...
