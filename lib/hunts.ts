@@ -41,7 +41,6 @@ export type HuntPartyMember = {
 
 export type HuntParty = {
   id: string;
-  name: string;
   server: string;
   /** Líder que cadastrou a PT (uid). */
   ownerId: string;
@@ -53,7 +52,6 @@ export type HuntParty = {
 };
 
 export type HuntPartyInput = {
-  name: string;
   server: string;
   members: HuntPartyMember[];
 };
@@ -114,8 +112,6 @@ export async function createHuntParty(
   ownerId: string,
   input: HuntPartyInput
 ): Promise<string> {
-  const trimmedName = input.name.trim();
-  if (!trimmedName) throw new Error("Nome da PT é obrigatório.");
   if (!input.server) throw new Error("Servidor é obrigatório.");
 
   const compositionError = validateHuntComposition(input.members);
@@ -127,7 +123,6 @@ export async function createHuntParty(
   const levelTop4Avg = calcLevelTop4Avg(input.members);
 
   const ref = await addDoc(huntPartiesCol(), {
-    name: trimmedName,
     server: input.server,
     ownerId,
     members: input.members.map((m) => ({
@@ -154,7 +149,6 @@ function mapHuntParty(snap: { id: string; data: () => Record<string, unknown> })
   const rawMembers = (d.members as HuntPartyMember[] | undefined) ?? [];
   return {
     id: snap.id,
-    name: (d.name as string) ?? "",
     server: (d.server as string) ?? "",
     ownerId: (d.ownerId as string) ?? "",
     members: rawMembers,

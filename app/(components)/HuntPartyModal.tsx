@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { FirebaseError } from "firebase/app";
 import { useOverlayClose } from "./useOverlayClose";
-import { Character, VOCATION_LABELS } from "@/lib/characters";
+import { Character } from "@/lib/characters";
 import {
   createHuntParty,
   fetchAllCharactersOnce,
@@ -28,10 +28,17 @@ const VOC_COLORS: Record<string, string> = {
   EM: "text-[#22d3ee]",
 };
 
+const SLOT_COUNT = HUNT_PARTY_MIN_SIZE; // 5 slots fixos
+
+type SlotState = HuntPartyMember | null;
+
 export function HuntPartyModal({ open, ownerId, onClose, onSuccess }: Props) {
-  const [name, setName] = useState("");
   const [server, setServer] = useState("");
-  const [members, setMembers] = useState<HuntPartyMember[]>([]);
+  const [slots, setSlots] = useState<SlotState[]>(() =>
+    Array(SLOT_COUNT).fill(null)
+  );
+  /** Índice do slot atualmente sendo preenchido (abre o picker inline). */
+  const [pickingSlot, setPickingSlot] = useState<number | null>(null);
   const [search, setSearch] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -47,24 +54,30 @@ export function HuntPartyModal({ open, ownerId, onClose, onSuccess }: Props) {
   // Reset ao fechar
   useEffect(() => {
     if (!open) {
-      setName("");
       setServer("");
-      setMembers([]);
+      setSlots(Array(SLOT_COUNT).fill(null));
+      setPickingSlot(null);
       setSearch("");
       setError(null);
       setBusy(false);
     }
   }, [open]);
 
-  // ESC pra fechar
+  // ESC fecha modal (ou picker)
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key !== "Escape") return;
+      if (pickingSlot !== null) {
+        setPickingSlot(null);
+        setSearch("");
+      } else {
+        onClose();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  }, [open, onClose, pickingSlot]);
 
   // Carrega chars uma vez ao abrir
   useEffect(() => {
@@ -108,83 +121,101 @@ export function HuntPartyModal({ open, ownerId, onClose, onSuccess }: Props) {
     };
   }, [open]);
 
-  // Auto-seleciona o server se 1º char escolhido define
-  useEffect(() => {
-    if (!server && members.length > 0) {
-      const firstChar = allChars?.find((c) => c.id === members[0].characterId);
-      if (firstChar?.server) setServer(firstChar.server);
-    }
-  }, [members, allChars, server]);
+  const filledMembers = useMemo(
+    () => slots.filter((s): s is HuntPartyMember => s !== null),
+    [slots]
+  );
 
-  // Filtra candidatos pra autocomplete
+  const filledCount = filledMembers.length;
+
+  // Candidatos pro picker do slot ativo
   const candidates = useMemo(() => {
-    if (!allChars) return [];
+    if (allChars === null || pickingSlot === null) return [];
     const q = search.trim().toLowerCase();
-    const memberIds = new Set(members.map((m) => m.characterId));
-    const memberOwners = new Set(members.map((m) => m.ownerId));
+    const usedCharIds = new Set(filledMembers.map((m) => m.characterId));
+    const usedOwnerIds = new Set(filledMembers.map((m) => m.ownerId));
 
     return allChars
-      .filter((c) => !memberIds.has(c.id))
+      .filter((c) => !usedCharIds.has(c.id))
       .filter((c) => !server || c.server === server)
       .filter((c) => (q ? c.name.toLowerCase().includes(q) : true))
       .map((c) => ({
         char: c,
-        ownerConflict: memberOwners.has(c.ownerId),
+        ownerConflict: usedOwnerIds.has(c.ownerId),
       }))
       .sort((a, b) => {
-        // chars sem conflito primeiro, depois alfabético
         if (a.ownerConflict !== b.ownerConflict) {
           return a.ownerConflict ? 1 : -1;
         }
         return a.char.name.localeCompare(b.char.name);
       })
-      .slice(0, 30);
-  }, [allChars, search, members, server]);
+      .slice(0, 50);
+  }, [allChars, search, filledMembers, server, pickingSlot]);
 
-  const addMember = (char: Character) => {
+  const openPicker = (slotIdx: number) => {
+    setError(null);
+    setPickingSlot(slotIdx);
+    setSearch("");
+  };
+
+  const closePicker = () => {
+    setPickingSlot(null);
+    setSearch("");
+  };
+
+  const assignChar = (slotIdx: number, char: Character) => {
     setError(null);
 
-    // Define server se ainda não tem
-    if (!server) setServer(char.server);
-
-    // Server conflict
-    if (server && char.server !== server) {
+    // Define server automaticamente se ainda não tem
+    if (!server) {
+      setServer(char.server);
+    } else if (char.server !== server) {
       setError(`${char.name} é de ${char.server}, não de ${server}.`);
       return;
     }
 
-    // Owner conflict
-    if (members.some((m) => m.ownerId === char.ownerId)) {
-      setError(
-        `Já existe um personagem do mesmo player (${char.name}) na PT. Só 1 char por player.`
-      );
-      return;
-    }
-
-    setMembers((prev) => [
-      ...prev,
-      {
+    setSlots((prev) => {
+      const next = [...prev];
+      next[slotIdx] = {
         characterId: char.id,
         ownerId: char.ownerId,
         name: char.name,
         vocation: char.vocation,
         level: char.level,
-      },
-    ]);
-    setSearch("");
+      };
+      return next;
+    });
+    closePicker();
   };
 
-  const removeMember = (id: string) => {
-    setMembers((prev) => prev.filter((m) => m.characterId !== id));
+  const clearSlot = (slotIdx: number) => {
+    setSlots((prev) => {
+      const next = [...prev];
+      next[slotIdx] = null;
+      return next;
+    });
+    // Se zerar tudo, libera o server pra trocar
+    setError(null);
   };
 
-  const levelAvg = useMemo(() => calcLevelTop4Avg(members), [members]);
+  const handleServerChange = (newServer: string) => {
+    if (newServer === server) return;
+    if (filledCount > 0) {
+      if (
+        !confirm(
+          "Trocar de servidor vai limpar todos os personagens adicionados. Continuar?"
+        )
+      ) {
+        return;
+      }
+      setSlots(Array(SLOT_COUNT).fill(null));
+    }
+    setServer(newServer);
+  };
 
-  const canSubmit =
-    !!name.trim() &&
-    !!server &&
-    members.length >= HUNT_PARTY_MIN_SIZE &&
-    !busy;
+  const levelAvg = useMemo(() => calcLevelTop4Avg(filledMembers), [filledMembers]);
+
+  const canSubmit = !!server && filledCount >= SLOT_COUNT && !busy;
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
@@ -192,9 +223,8 @@ export function HuntPartyModal({ open, ownerId, onClose, onSuccess }: Props) {
     setError(null);
     try {
       const id = await createHuntParty(ownerId, {
-        name: name.trim(),
         server,
-        members,
+        members: filledMembers,
       });
       onSuccess?.(id);
       onClose();
@@ -218,19 +248,20 @@ export function HuntPartyModal({ open, ownerId, onClose, onSuccess }: Props) {
       className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-start sm:items-center justify-center p-3 sm:p-6 overflow-y-auto"
       {...overlayProps}
     >
-      <div className="w-full max-w-2xl bg-[var(--background-elev)] border border-[var(--border)] rounded-lg shadow-2xl">
+      <div className="w-full max-w-xl bg-[var(--background-elev)] border border-[var(--border)] rounded-lg shadow-2xl">
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border)]">
+        <div className="sticky top-0 bg-[var(--background-elev)] z-10 flex items-center justify-between px-5 py-4 border-b border-[var(--border)]">
           <div>
-            <h2 className="text-lg font-semibold">📅 Nova PT de Hunt</h2>
-            <p className="text-xs text-[var(--text-mute)] mt-0.5">
-              Cadastre sua PT pra concorrer no planilhado
+            <h2 className="text-base font-semibold">📅 Registrar PT de Hunt</h2>
+            <p className="text-[11px] text-[var(--text-mute)] mt-0.5">
+              {filledCount}/{SLOT_COUNT} chars · todos do mesmo servidor · 1 char
+              por player
             </p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="text-[var(--text-mute)] hover:text-[var(--text)] text-xl leading-none px-2"
+            className="text-[var(--text-mute)] hover:text-[var(--text)] w-8 h-8 rounded-md hover:bg-[var(--background-elev-2)] flex items-center justify-center"
             aria-label="Fechar"
           >
             ✕
@@ -239,60 +270,37 @@ export function HuntPartyModal({ open, ownerId, onClose, onSuccess }: Props) {
 
         {/* Body */}
         <div className="p-5 space-y-5">
-          {/* Nome + Server */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs uppercase tracking-wider text-[var(--text-dim)] mb-1.5">
-                Nome da PT *
-              </label>
-              <input
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Ex: Os Fudidos"
-                className="w-full bg-[var(--background)] border border-[var(--border-strong)] focus:border-[var(--accent)] rounded-md px-3 py-2 text-sm outline-none"
-              />
-            </div>
-            <div>
-              <label className="block text-xs uppercase tracking-wider text-[var(--text-dim)] mb-1.5">
-                Servidor *
-              </label>
-              <select
-                value={server}
-                onChange={(e) => {
-                  // Trocar de server limpa members (todos precisam ser do mesmo)
-                  if (e.target.value !== server && members.length > 0) {
-                    if (
-                      !confirm(
-                        "Trocar de servidor vai limpar todos os personagens adicionados. Continuar?"
-                      )
-                    ) {
-                      return;
-                    }
-                    setMembers([]);
-                  }
-                  setServer(e.target.value);
-                }}
-                disabled={loadingServers}
-                className="w-full bg-[var(--background)] border border-[var(--border-strong)] focus:border-[var(--accent)] rounded-md px-3 py-2 text-sm outline-none disabled:opacity-50"
-              >
-                <option value="">— escolha o servidor —</option>
-                {servers.map((s) => (
-                  <option key={s.name} value={s.name}>
-                    {s.name} ({s.pvp})
-                  </option>
-                ))}
-              </select>
-            </div>
+          {/* Servidor */}
+          <div>
+            <label className="block text-xs uppercase tracking-wider text-[var(--text-dim)] mb-1.5">
+              Servidor *
+            </label>
+            <select
+              value={server}
+              onChange={(e) => handleServerChange(e.target.value)}
+              disabled={loadingServers}
+              className="w-full bg-[var(--background)] border border-[var(--border-strong)] focus:border-[var(--accent)] rounded-md px-3 py-2 text-sm outline-none disabled:opacity-50"
+            >
+              <option value="">— escolha o servidor —</option>
+              {servers.map((s) => (
+                <option key={s.name} value={s.name}>
+                  {s.name} ({s.pvp})
+                </option>
+              ))}
+            </select>
+            <p className="text-[11px] text-[var(--text-dim)] mt-1">
+              Pode escolher antes ou simplesmente adicionar o 1º char — o servidor
+              é definido automaticamente.
+            </p>
           </div>
 
-          {/* Composição */}
+          {/* Slots */}
           <div>
             <div className="flex items-center justify-between mb-2">
               <label className="block text-xs uppercase tracking-wider text-[var(--text-dim)]">
-                Composição ({members.length}/{HUNT_PARTY_MIN_SIZE}+ mínimo)
+                Composição ({filledCount}/{SLOT_COUNT})
               </label>
-              {members.length >= HUNT_PARTY_MIN_SIZE && (
+              {filledCount > 0 && (
                 <span className="text-xs text-[var(--text-mute)]">
                   Lvl médio (top 4):{" "}
                   <strong className="text-[var(--accent)]">{levelAvg}</strong>
@@ -300,120 +308,103 @@ export function HuntPartyModal({ open, ownerId, onClose, onSuccess }: Props) {
               )}
             </div>
 
-            {/* Lista de members atuais */}
-            {members.length > 0 && (
-              <div className="space-y-1.5 mb-3">
-                {members.map((m) => (
-                  <div
-                    key={m.characterId}
-                    className="flex items-center gap-3 px-3 py-2 bg-[var(--background)] border border-[var(--border)] rounded-md text-sm"
-                  >
-                    <span
-                      className={`font-semibold ${
-                        VOC_COLORS[m.vocation] ?? "text-[var(--text-mute)]"
-                      }`}
-                    >
-                      {m.vocation}
-                    </span>
-                    <span className="flex-1 truncate">{m.name}</span>
-                    <span className="text-[var(--text-mute)] text-xs">
-                      lvl {m.level}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => removeMember(m.characterId)}
-                      className="text-[var(--text-mute)] hover:text-red-400 text-xs px-1"
-                      aria-label="Remover"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
+            <div className="space-y-2">
+              {slots.map((slot, idx) => {
+                const active = pickingSlot === idx;
+                return (
+                  <div key={idx}>
+                    <SlotRow
+                      idx={idx}
+                      slot={slot}
+                      active={active}
+                      onPick={() => openPicker(idx)}
+                      onClear={() => clearSlot(idx)}
+                    />
 
-            {/* Busca de char */}
-            <div className="relative">
-              <input
-                type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="🔍 Buscar personagem por nome..."
-                disabled={loadingChars}
-                className="w-full bg-[var(--background)] border border-[var(--border-strong)] focus:border-[var(--accent)] rounded-md px-3 py-2 text-sm outline-none disabled:opacity-50"
-              />
-              {loadingChars && (
-                <p className="text-xs text-[var(--text-mute)] mt-1">
-                  Carregando personagens...
-                </p>
-              )}
-            </div>
+                    {/* Picker inline embaixo do slot ativo */}
+                    {active && (
+                      <div className="mt-2 border border-[var(--accent)]/40 rounded-md bg-[var(--background)]/60 p-3">
+                        <div className="flex items-center gap-2 mb-2">
+                          <input
+                            autoFocus
+                            type="text"
+                            value={search}
+                            onChange={(e) => setSearch(e.target.value)}
+                            placeholder="🔍 Buscar char por nome..."
+                            className="flex-1 bg-[var(--background)] border border-[var(--border-strong)] focus:border-[var(--accent)] rounded-md px-3 py-1.5 text-sm outline-none"
+                          />
+                          <button
+                            type="button"
+                            onClick={closePicker}
+                            className="text-xs text-[var(--text-mute)] hover:text-[var(--text)] px-2"
+                          >
+                            cancelar
+                          </button>
+                        </div>
 
-            {/* Resultados */}
-            {search.trim() && !loadingChars && (
-              <div className="mt-2 max-h-60 overflow-y-auto border border-[var(--border)] rounded-md divide-y divide-[var(--border)]">
-                {candidates.length === 0 ? (
-                  <p className="px-3 py-3 text-xs text-[var(--text-mute)] text-center">
-                    Nenhum personagem encontrado.
-                    {server && (
-                      <>
-                        {" "}
-                        Lembre que só aparecem chars do servidor{" "}
-                        <strong>{server}</strong>.
-                      </>
+                        {loadingChars ? (
+                          <p className="text-xs text-[var(--text-mute)] text-center py-3">
+                            Carregando personagens...
+                          </p>
+                        ) : candidates.length === 0 ? (
+                          <p className="text-xs text-[var(--text-mute)] text-center py-3">
+                            Nenhum char encontrado
+                            {server && (
+                              <>
+                                {" "}
+                                no servidor <strong>{server}</strong>
+                              </>
+                            )}
+                            .
+                          </p>
+                        ) : (
+                          <div className="max-h-60 overflow-y-auto divide-y divide-[var(--border)]">
+                            {candidates.map(({ char, ownerConflict }) => (
+                              <button
+                                key={char.id}
+                                type="button"
+                                disabled={ownerConflict}
+                                onClick={() =>
+                                  !ownerConflict && assignChar(idx, char)
+                                }
+                                title={
+                                  ownerConflict
+                                    ? "Já tem outro char do mesmo player na PT"
+                                    : undefined
+                                }
+                                className={`w-full text-left flex items-center gap-3 px-2 py-1.5 text-sm rounded transition ${
+                                  ownerConflict
+                                    ? "opacity-40 cursor-not-allowed"
+                                    : "hover:bg-[var(--background-elev-2)]"
+                                }`}
+                              >
+                                <span
+                                  className={`font-semibold w-8 ${
+                                    VOC_COLORS[char.vocation] ??
+                                    "text-[var(--text-mute)]"
+                                  }`}
+                                >
+                                  {char.vocation}
+                                </span>
+                                <span className="flex-1 truncate">
+                                  {char.name}
+                                </span>
+                                <span className="text-[var(--text-mute)] text-xs">
+                                  lvl {char.level}
+                                </span>
+                                <span className="text-[var(--text-dim)] text-[10px] uppercase">
+                                  {char.server}
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     )}
-                  </p>
-                ) : (
-                  candidates.map(({ char, ownerConflict }) => (
-                    <button
-                      key={char.id}
-                      type="button"
-                      onClick={() => !ownerConflict && addMember(char)}
-                      disabled={ownerConflict}
-                      className={`w-full text-left flex items-center gap-3 px-3 py-2 text-sm transition ${
-                        ownerConflict
-                          ? "opacity-40 cursor-not-allowed"
-                          : "hover:bg-[var(--background-elev-2)]"
-                      }`}
-                      title={
-                        ownerConflict
-                          ? "Já tem outro char do mesmo player na PT"
-                          : undefined
-                      }
-                    >
-                      <span
-                        className={`font-semibold w-8 ${
-                          VOC_COLORS[char.vocation] ?? "text-[var(--text-mute)]"
-                        }`}
-                      >
-                        {char.vocation}
-                      </span>
-                      <span className="flex-1 truncate">{char.name}</span>
-                      <span className="text-[var(--text-mute)] text-xs">
-                        lvl {char.level}
-                      </span>
-                      <span className="text-[var(--text-dim)] text-[10px] uppercase">
-                        {char.server}
-                      </span>
-                    </button>
-                  ))
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Regras */}
-          <div className="text-[11px] text-[var(--text-mute)] bg-[var(--background)]/50 border border-[var(--border)] rounded-md p-3 space-y-1">
-            <p>
-              <strong>⚠ Regras validadas automaticamente:</strong>
-            </p>
-            <p>• Mínimo {HUNT_PARTY_MIN_SIZE} personagens</p>
-            <p>• Todos no mesmo servidor</p>
-            <p>• 1 personagem por player (sem 2 chars do mesmo dono)</p>
-            <p>
-              • Personagem precisa estar cadastrado no site (em{" "}
-              <em>Meus personagens</em>)
-            </p>
+                  </div>
+                );
+              })}
+            </div>
           </div>
 
           {/* Erro */}
@@ -445,5 +436,71 @@ export function HuntPartyModal({ open, ownerId, onClose, onSuccess }: Props) {
         </div>
       </div>
     </div>
+  );
+}
+
+function SlotRow({
+  idx,
+  slot,
+  active,
+  onPick,
+  onClear,
+}: {
+  idx: number;
+  slot: SlotState;
+  active: boolean;
+  onPick: () => void;
+  onClear: () => void;
+}) {
+  if (slot) {
+    return (
+      <div
+        className={`flex items-center gap-3 px-3 py-2.5 bg-[var(--background)] border rounded-md text-sm ${
+          active
+            ? "border-[var(--accent)]/40"
+            : "border-[var(--border-strong)]"
+        }`}
+      >
+        <span className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider w-12 shrink-0">
+          Slot {idx + 1}
+        </span>
+        <span
+          className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border border-[var(--border-strong)] bg-[var(--background-elev-2)] ${
+            VOC_COLORS[slot.vocation] ?? "text-[var(--text-mute)]"
+          }`}
+        >
+          {slot.vocation}
+        </span>
+        <span className="flex-1 truncate font-medium">{slot.name}</span>
+        <span className="text-[var(--text-mute)] text-xs">lvl {slot.level}</span>
+        <button
+          type="button"
+          onClick={onClear}
+          className="text-[var(--text-mute)] hover:text-red-400 text-xs px-1.5"
+          aria-label="Remover do slot"
+        >
+          ✕
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={onPick}
+      className={`w-full flex items-center gap-3 px-3 py-2.5 border-2 border-dashed rounded-md text-sm transition ${
+        active
+          ? "border-[var(--accent)] bg-[var(--accent)]/5"
+          : "border-[var(--border-strong)] text-[var(--text-mute)] hover:border-[var(--accent-dim)] hover:text-[var(--text)]"
+      }`}
+    >
+      <span className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider w-12 shrink-0 text-left">
+        Slot {idx + 1}
+      </span>
+      <span className="flex-1 text-left">
+        {active ? "Escolha um char abaixo..." : "+ Adicionar char"}
+      </span>
+    </button>
   );
 }

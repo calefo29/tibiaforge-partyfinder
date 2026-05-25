@@ -9,7 +9,6 @@ import {
   HuntParty,
   deleteHuntParty,
   subscribeToAllHuntParties,
-  subscribeToMyHuntParties,
 } from "@/lib/hunts";
 import {
   HUNT_GROUP_LABELS,
@@ -19,7 +18,6 @@ import {
   HuntResp,
   HuntRespGroup,
   formatSlot,
-  respsByGroup,
 } from "@/lib/hunt-resps";
 
 const VOC_COLORS: Record<string, string> = {
@@ -30,7 +28,7 @@ const VOC_COLORS: Record<string, string> = {
   EM: "text-[#22d3ee]",
 };
 
-type Tab = "calendario" | "ranking" | "minhas";
+type Tab = "calendario" | "pts" | "ranking";
 
 export default function PlanilhadoPage() {
   const router = useRouter();
@@ -38,10 +36,11 @@ export default function PlanilhadoPage() {
 
   const [tab, setTab] = useState<Tab>("calendario");
   const [allParties, setAllParties] = useState<HuntParty[] | null>(null);
-  const [myParties, setMyParties] = useState<HuntParty[] | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  /** Toggle "Só as que eu faço parte". Default false = mostra todas. */
+  const [onlyMine, setOnlyMine] = useState(false);
 
   useEffect(() => {
     if (!loading && !user) router.replace("/login");
@@ -49,12 +48,8 @@ export default function PlanilhadoPage() {
 
   useEffect(() => {
     if (!user) return;
-    const unsubAll = subscribeToAllHuntParties(setAllParties);
-    const unsubMine = subscribeToMyHuntParties(user.uid, setMyParties);
-    return () => {
-      unsubAll();
-      unsubMine();
-    };
+    const unsub = subscribeToAllHuntParties(setAllParties);
+    return () => unsub();
   }, [user]);
 
   const handleDelete = async (id: string) => {
@@ -70,6 +65,29 @@ export default function PlanilhadoPage() {
     }
   };
 
+  /**
+   * Toggle "Só as que eu faço parte" considera tanto PTs onde sou owner quanto
+   * PTs em que algum char meu está na composição (member.ownerId === user.uid).
+   */
+  const visibleParties = useMemo(() => {
+    if (!allParties || !user) return allParties;
+    if (!onlyMine) return allParties;
+    return allParties.filter(
+      (p) =>
+        p.ownerId === user.uid ||
+        p.members.some((m) => m.ownerId === user.uid)
+    );
+  }, [allParties, onlyMine, user]);
+
+  const myPartiesCount = useMemo(() => {
+    if (!allParties || !user) return 0;
+    return allParties.filter(
+      (p) =>
+        p.ownerId === user.uid ||
+        p.members.some((m) => m.ownerId === user.uid)
+    ).length;
+  }, [allParties, user]);
+
   if (loading || !user) {
     return (
       <AppShell>
@@ -84,45 +102,54 @@ export default function PlanilhadoPage() {
     <AppShell>
       <div className="px-3 sm:px-6 md:px-8 py-4 md:py-8 max-w-7xl mx-auto space-y-6">
         {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-bold flex items-center gap-2">
-              📅 Planilhado de Hunts
-            </h1>
-            <p className="text-sm text-[var(--text-mute)] mt-1">
-              Cadastre sua PT e concorra aos slots de cada resp.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => setModalOpen(true)}
-            className="bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-[#04122a] font-semibold px-4 py-2 rounded-md text-sm transition self-start sm:self-auto"
-          >
-            + Registrar PT
-          </button>
+        <div>
+          <h1 className="text-2xl font-bold flex items-center gap-2">
+            📅 Planilhado de Hunts
+          </h1>
+          <p className="text-sm text-[var(--text-mute)] mt-1">
+            Cadastre sua PT e concorra aos slots de cada resp.
+          </p>
         </div>
 
         {/* Tabs */}
         <div className="flex gap-1 border-b border-[var(--border)] overflow-x-auto">
-          <TabButton active={tab === "calendario"} onClick={() => setTab("calendario")}>
+          <TabButton
+            active={tab === "calendario"}
+            onClick={() => setTab("calendario")}
+          >
             Calendário
           </TabButton>
-          <TabButton active={tab === "minhas"} onClick={() => setTab("minhas")} count={myParties?.length}>
-            Minhas PTs
+          <TabButton
+            active={tab === "pts"}
+            onClick={() => setTab("pts")}
+            count={allParties?.length}
+          >
+            PTs registradas
           </TabButton>
-          <TabButton active={tab === "ranking"} onClick={() => setTab("ranking")} disabled>
+          <TabButton
+            active={tab === "ranking"}
+            onClick={() => setTab("ranking")}
+            disabled
+          >
             Ranking (em breve)
           </TabButton>
         </div>
 
         {/* Tab content */}
-        {tab === "calendario" && <CalendarioView search={search} setSearch={setSearch} />}
-        {tab === "minhas" && (
-          <MinhasView
-            parties={myParties}
+        {tab === "calendario" && (
+          <CalendarioView search={search} setSearch={setSearch} />
+        )}
+        {tab === "pts" && (
+          <PartiesView
+            parties={visibleParties}
+            myParticipationCount={myPartiesCount}
+            totalCount={allParties?.length ?? 0}
+            onlyMine={onlyMine}
+            setOnlyMine={setOnlyMine}
+            currentUid={user.uid}
+            onCreate={() => setModalOpen(true)}
             onDelete={handleDelete}
             deletingId={deletingId}
-            onCreate={() => setModalOpen(true)}
           />
         )}
         {tab === "ranking" && (
@@ -278,106 +305,175 @@ function RespCard({ resp }: { resp: HuntResp }) {
   );
 }
 
-/* ─────────────── Minhas PTs ─────────────── */
+/* ─────────────── PTs registradas ─────────────── */
 
-function MinhasView({
+function PartiesView({
   parties,
+  myParticipationCount,
+  totalCount,
+  onlyMine,
+  setOnlyMine,
+  currentUid,
+  onCreate,
   onDelete,
   deletingId,
-  onCreate,
 }: {
   parties: HuntParty[] | null;
+  myParticipationCount: number;
+  totalCount: number;
+  onlyMine: boolean;
+  setOnlyMine: (v: boolean) => void;
+  currentUid: string;
+  onCreate: () => void;
   onDelete: (id: string) => void;
   deletingId: string | null;
-  onCreate: () => void;
 }) {
-  if (parties === null) {
-    return (
-      <p className="text-center py-12 text-sm text-[var(--text-mute)]">
-        Carregando...
-      </p>
-    );
-  }
-
-  if (parties.length === 0) {
-    return (
-      <div className="text-center py-12 space-y-3">
-        <p className="text-sm text-[var(--text-mute)]">
-          Você ainda não tem nenhuma PT de hunt cadastrada.
-        </p>
+  return (
+    <div className="space-y-4">
+      {/* Botão + toggle */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <button
           type="button"
           onClick={onCreate}
-          className="bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-[#04122a] font-semibold px-4 py-2 rounded-md text-sm transition"
+          className="bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-[#04122a] font-semibold px-4 py-2 rounded-md text-sm transition self-start sm:self-auto"
         >
-          + Registrar primeira PT
+          + Registrar PT
         </button>
-      </div>
-    );
-  }
 
-  return (
-    <div className="space-y-3">
-      {parties.map((p) => (
-        <HuntPartyCard
-          key={p.id}
-          party={p}
-          onDelete={() => onDelete(p.id)}
-          deleting={deletingId === p.id}
-        />
-      ))}
+        <label className="inline-flex items-center gap-2 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={onlyMine}
+            onChange={(e) => setOnlyMine(e.target.checked)}
+            className="w-4 h-4 accent-[var(--accent)]"
+          />
+          <span className="text-sm text-[var(--text-mute)]">
+            Só as PTs que faço parte
+            {myParticipationCount > 0 && (
+              <span className="ml-1.5 text-[11px] text-[var(--text-dim)]">
+                ({myParticipationCount} de {totalCount})
+              </span>
+            )}
+          </span>
+        </label>
+      </div>
+
+      {/* Lista */}
+      {parties === null ? (
+        <p className="text-center py-12 text-sm text-[var(--text-mute)]">
+          Carregando...
+        </p>
+      ) : parties.length === 0 ? (
+        <div className="text-center py-12 space-y-3 border border-dashed border-[var(--border)] rounded-lg">
+          <p className="text-sm text-[var(--text-mute)]">
+            {onlyMine
+              ? "Você ainda não faz parte de nenhuma PT."
+              : "Nenhuma PT registrada ainda. Seja o primeiro!"}
+          </p>
+          {!onlyMine && (
+            <button
+              type="button"
+              onClick={onCreate}
+              className="bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-[#04122a] font-semibold px-4 py-2 rounded-md text-sm transition"
+            >
+              + Registrar primeira PT
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {parties.map((p) => (
+            <HuntPartyCard
+              key={p.id}
+              party={p}
+              currentUid={currentUid}
+              onDelete={() => onDelete(p.id)}
+              deleting={deletingId === p.id}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
 function HuntPartyCard({
   party,
+  currentUid,
   onDelete,
   deleting,
 }: {
   party: HuntParty;
+  currentUid: string;
   onDelete: () => void;
   deleting: boolean;
 }) {
+  const isOwner = party.ownerId === currentUid;
+  const imIn = party.members.some((m) => m.ownerId === currentUid);
+
   return (
     <div className="bg-[var(--background-elev)] border border-[var(--border)] rounded-lg p-4">
       <div className="flex items-start justify-between gap-3 mb-3">
-        <div>
-          <h3 className="font-semibold text-base">{party.name}</h3>
-          <p className="text-xs text-[var(--text-mute)] mt-0.5">
-            {party.server} · {party.members.length} chars · Lvl médio (top 4):{" "}
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs uppercase tracking-wider text-[var(--text-dim)] font-semibold">
+            {party.server}
+          </span>
+          <span className="text-xs text-[var(--text-mute)]">
+            · {party.members.length} chars
+          </span>
+          <span className="text-xs text-[var(--text-mute)]">
+            · Lvl médio (top 4):{" "}
             <strong className="text-[var(--accent)]">
               {party.levelTop4Avg}
             </strong>
-          </p>
+          </span>
+          {imIn && !isOwner && (
+            <span className="text-[10px] uppercase tracking-wider bg-[var(--accent)]/15 text-[var(--accent)] border border-[var(--accent)]/30 px-1.5 py-0.5 rounded-full">
+              Você
+            </span>
+          )}
+          {isOwner && (
+            <span className="text-[10px] uppercase tracking-wider bg-amber-500/15 text-amber-400 border border-amber-400/30 px-1.5 py-0.5 rounded-full">
+              Host
+            </span>
+          )}
         </div>
-        <button
-          type="button"
-          onClick={onDelete}
-          disabled={deleting}
-          className="text-xs text-[var(--text-mute)] hover:text-red-400 border border-[var(--border-strong)] hover:border-red-400/40 rounded-md px-2.5 py-1 transition disabled:opacity-50"
-        >
-          {deleting ? "Deletando..." : "Deletar"}
-        </button>
+        {isOwner && (
+          <button
+            type="button"
+            onClick={onDelete}
+            disabled={deleting}
+            className="text-xs text-[var(--text-mute)] hover:text-red-400 border border-[var(--border-strong)] hover:border-red-400/40 rounded-md px-2.5 py-1 transition disabled:opacity-50 shrink-0"
+          >
+            {deleting ? "Deletando..." : "Deletar"}
+          </button>
+        )}
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5">
-        {party.members.map((m) => (
-          <div
-            key={m.characterId}
-            className="flex items-center gap-2 px-2.5 py-1.5 bg-[var(--background)]/50 border border-[var(--border)] rounded text-xs"
-          >
-            <span
-              className={`font-semibold w-7 ${
-                VOC_COLORS[m.vocation] ?? "text-[var(--text-mute)]"
+        {party.members.map((m) => {
+          const isMine = m.ownerId === currentUid;
+          return (
+            <div
+              key={m.characterId}
+              className={`flex items-center gap-2 px-2.5 py-1.5 border rounded text-xs ${
+                isMine
+                  ? "bg-[var(--accent)]/8 border-[var(--accent)]/30"
+                  : "bg-[var(--background)]/50 border-[var(--border)]"
               }`}
             >
-              {m.vocation}
-            </span>
-            <span className="flex-1 truncate">{m.name}</span>
-            <span className="text-[var(--text-mute)]">{m.level}</span>
-          </div>
-        ))}
+              <span
+                className={`font-semibold w-7 ${
+                  VOC_COLORS[m.vocation] ?? "text-[var(--text-mute)]"
+                }`}
+              >
+                {m.vocation}
+              </span>
+              <span className="flex-1 truncate">{m.name}</span>
+              <span className="text-[var(--text-mute)]">{m.level}</span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
