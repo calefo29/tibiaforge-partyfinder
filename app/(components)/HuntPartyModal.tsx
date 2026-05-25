@@ -3,7 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { FirebaseError } from "firebase/app";
 import { useOverlayClose } from "./useOverlayClose";
-import { Character } from "@/lib/characters";
+import {
+  Character,
+  subscribeToUserCharacters,
+} from "@/lib/characters";
 import {
   createHuntParty,
   fetchAllCharactersOnce,
@@ -11,7 +14,6 @@ import {
   HuntPartyMember,
   calcLevelTop4Avg,
 } from "@/lib/hunts";
-import type { ServerInfo, ServersResponse } from "@/app/api/servers/route";
 
 type Props = {
   open: boolean;
@@ -28,14 +30,28 @@ const VOC_COLORS: Record<string, string> = {
   EM: "text-[#22d3ee]",
 };
 
-const SLOT_COUNT = HUNT_PARTY_MIN_SIZE; // 5 slots fixos
+const SLOT_COUNT = HUNT_PARTY_MIN_SIZE; // 5 slots fixos (1 líder + 4)
 
 type SlotState = HuntPartyMember | null;
 
+function charToMember(c: Character): HuntPartyMember {
+  return {
+    characterId: c.id,
+    ownerId: c.ownerId,
+    name: c.name,
+    vocation: c.vocation,
+    level: c.level,
+  };
+}
+
 export function HuntPartyModal({ open, ownerId, onClose, onSuccess }: Props) {
-  const [server, setServer] = useState("");
-  const [slots, setSlots] = useState<SlotState[]>(() =>
-    Array(SLOT_COUNT).fill(null)
+  /** Chars do próprio user (pra escolher o líder). */
+  const [myChars, setMyChars] = useState<Character[] | null>(null);
+  /** Char escolhido como líder. Define o server da PT. */
+  const [leaderCharId, setLeaderCharId] = useState<string | null>(null);
+  /** Slots 1..4 (líder ocupa slot 0 implicitamente). */
+  const [otherSlots, setOtherSlots] = useState<SlotState[]>(() =>
+    Array(SLOT_COUNT - 1).fill(null)
   );
   /** Índice do slot atualmente sendo preenchido (abre o picker inline). */
   const [pickingSlot, setPickingSlot] = useState<number | null>(null);
@@ -43,19 +59,17 @@ export function HuntPartyModal({ open, ownerId, onClose, onSuccess }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  /** Cache de todos os chars do site (carregado on demand quando vai abrir picker). */
   const [allChars, setAllChars] = useState<Character[] | null>(null);
-  const [loadingChars, setLoadingChars] = useState(false);
-
-  const [servers, setServers] = useState<ServerInfo[]>([]);
-  const [loadingServers, setLoadingServers] = useState(false);
+  const [loadingAllChars, setLoadingAllChars] = useState(false);
 
   const overlayProps = useOverlayClose(onClose);
 
   // Reset ao fechar
   useEffect(() => {
     if (!open) {
-      setServer("");
-      setSlots(Array(SLOT_COUNT).fill(null));
+      setLeaderCharId(null);
+      setOtherSlots(Array(SLOT_COUNT - 1).fill(null));
       setPickingSlot(null);
       setSearch("");
       setError(null);
@@ -63,7 +77,7 @@ export function HuntPartyModal({ open, ownerId, onClose, onSuccess }: Props) {
     }
   }, [open]);
 
-  // ESC fecha modal (ou picker)
+  // ESC fecha picker (se aberto) ou modal
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -79,11 +93,18 @@ export function HuntPartyModal({ open, ownerId, onClose, onSuccess }: Props) {
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose, pickingSlot]);
 
-  // Carrega chars uma vez ao abrir
+  // Subscribe nos chars do próprio user
   useEffect(() => {
     if (!open) return;
+    return subscribeToUserCharacters(ownerId, setMyChars);
+  }, [open, ownerId]);
+
+  // Carrega allChars na primeira vez que o user vai abrir um picker
+  useEffect(() => {
+    if (!open || pickingSlot === null || allChars !== null || loadingAllChars)
+      return;
     let cancelled = false;
-    setLoadingChars(true);
+    setLoadingAllChars(true);
     fetchAllCharactersOnce()
       .then((cs) => {
         if (!cancelled) setAllChars(cs);
@@ -93,66 +114,79 @@ export function HuntPartyModal({ open, ownerId, onClose, onSuccess }: Props) {
         if (!cancelled) setAllChars([]);
       })
       .finally(() => {
-        if (!cancelled) setLoadingChars(false);
+        if (!cancelled) setLoadingAllChars(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [open]);
+  }, [open, pickingSlot, allChars, loadingAllChars]);
 
-  // Carrega servers ao abrir
-  useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
-    setLoadingServers(true);
-    fetch("/api/servers")
-      .then((r) => r.json() as Promise<ServersResponse>)
-      .then((data) => {
-        if (!cancelled) setServers(data.servers || []);
-      })
-      .catch((err) => {
-        console.error("[HuntPartyModal] /api/servers", err);
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingServers(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [open]);
-
-  const filledMembers = useMemo(
-    () => slots.filter((s): s is HuntPartyMember => s !== null),
-    [slots]
+  const leaderChar = useMemo(
+    () => myChars?.find((c) => c.id === leaderCharId) ?? null,
+    [myChars, leaderCharId]
   );
 
-  const filledCount = filledMembers.length;
+  const server = leaderChar?.server ?? "";
 
-  // Candidatos pro picker do slot ativo
+  const filledOthers = useMemo(
+    () => otherSlots.filter((s): s is HuntPartyMember => s !== null),
+    [otherSlots]
+  );
+
+  const allMembers = useMemo<HuntPartyMember[]>(() => {
+    if (!leaderChar) return filledOthers;
+    return [charToMember(leaderChar), ...filledOthers];
+  }, [leaderChar, filledOthers]);
+
+  const filledCount = allMembers.length;
+
+  // Candidatos pro picker do slot ativo (apenas chars de OUTROS players, mesmo server)
   const candidates = useMemo(() => {
-    if (allChars === null || pickingSlot === null) return [];
+    if (allChars === null || pickingSlot === null || !leaderChar) return [];
     const q = search.trim().toLowerCase();
-    const usedCharIds = new Set(filledMembers.map((m) => m.characterId));
-    const usedOwnerIds = new Set(filledMembers.map((m) => m.ownerId));
+    const usedCharIds = new Set(allMembers.map((m) => m.characterId));
+    const usedOwnerIds = new Set(allMembers.map((m) => m.ownerId));
 
     return allChars
+      .filter((c) => c.server === leaderChar.server)
       .filter((c) => !usedCharIds.has(c.id))
-      .filter((c) => !server || c.server === server)
+      // Bloqueia chars do próprio líder e chars de qualquer player já na PT
+      .filter((c) => !usedOwnerIds.has(c.ownerId))
       .filter((c) => (q ? c.name.toLowerCase().includes(q) : true))
-      .map((c) => ({
-        char: c,
-        ownerConflict: usedOwnerIds.has(c.ownerId),
-      }))
-      .sort((a, b) => {
-        if (a.ownerConflict !== b.ownerConflict) {
-          return a.ownerConflict ? 1 : -1;
-        }
-        return a.char.name.localeCompare(b.char.name);
-      })
+      .sort((a, b) => a.name.localeCompare(b.name))
       .slice(0, 50);
-  }, [allChars, search, filledMembers, server, pickingSlot]);
+  }, [allChars, search, allMembers, leaderChar, pickingSlot]);
+
+  const selectLeader = (charId: string) => {
+    setError(null);
+    if (leaderCharId && leaderCharId !== charId && filledOthers.length > 0) {
+      const leaderChanged = myChars?.find((c) => c.id === leaderCharId);
+      const newLeader = myChars?.find((c) => c.id === charId);
+      if (
+        leaderChanged &&
+        newLeader &&
+        leaderChanged.server !== newLeader.server
+      ) {
+        if (
+          !confirm(
+            "Trocar pra um líder de outro servidor vai limpar os chars convidados. Continuar?"
+          )
+        ) {
+          return;
+        }
+        setOtherSlots(Array(SLOT_COUNT - 1).fill(null));
+      }
+    }
+    setLeaderCharId(charId);
+    setPickingSlot(null);
+    setSearch("");
+  };
 
   const openPicker = (slotIdx: number) => {
+    if (!leaderChar) {
+      setError("Escolha primeiro o char líder.");
+      return;
+    }
     setError(null);
     setPickingSlot(slotIdx);
     setSearch("");
@@ -165,66 +199,36 @@ export function HuntPartyModal({ open, ownerId, onClose, onSuccess }: Props) {
 
   const assignChar = (slotIdx: number, char: Character) => {
     setError(null);
-
-    // Define server automaticamente se ainda não tem
-    if (!server) {
-      setServer(char.server);
-    } else if (char.server !== server) {
-      setError(`${char.name} é de ${char.server}, não de ${server}.`);
-      return;
-    }
-
-    setSlots((prev) => {
+    setOtherSlots((prev) => {
       const next = [...prev];
-      next[slotIdx] = {
-        characterId: char.id,
-        ownerId: char.ownerId,
-        name: char.name,
-        vocation: char.vocation,
-        level: char.level,
-      };
+      next[slotIdx] = charToMember(char);
       return next;
     });
     closePicker();
   };
 
   const clearSlot = (slotIdx: number) => {
-    setSlots((prev) => {
+    setOtherSlots((prev) => {
       const next = [...prev];
       next[slotIdx] = null;
       return next;
     });
-    // Se zerar tudo, libera o server pra trocar
     setError(null);
   };
 
-  const handleServerChange = (newServer: string) => {
-    if (newServer === server) return;
-    if (filledCount > 0) {
-      if (
-        !confirm(
-          "Trocar de servidor vai limpar todos os personagens adicionados. Continuar?"
-        )
-      ) {
-        return;
-      }
-      setSlots(Array(SLOT_COUNT).fill(null));
-    }
-    setServer(newServer);
-  };
+  const levelAvg = useMemo(() => calcLevelTop4Avg(allMembers), [allMembers]);
 
-  const levelAvg = useMemo(() => calcLevelTop4Avg(filledMembers), [filledMembers]);
-
-  const canSubmit = !!server && filledCount >= SLOT_COUNT && !busy;
+  const canSubmit =
+    !!leaderChar && filledCount >= SLOT_COUNT && !busy;
 
   const handleSubmit = async () => {
-    if (!canSubmit) return;
+    if (!canSubmit || !leaderChar) return;
     setBusy(true);
     setError(null);
     try {
       const id = await createHuntParty(ownerId, {
-        server,
-        members: filledMembers,
+        server: leaderChar.server,
+        members: allMembers,
       });
       onSuccess?.(id);
       onClose();
@@ -248,14 +252,15 @@ export function HuntPartyModal({ open, ownerId, onClose, onSuccess }: Props) {
       className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-start sm:items-center justify-center p-3 sm:p-6 overflow-y-auto"
       {...overlayProps}
     >
-      <div className="w-full max-w-xl bg-[var(--background-elev)] border border-[var(--border)] rounded-lg shadow-2xl">
+      <div className="w-full max-w-xl bg-[var(--background-elev)] border border-[var(--border)] rounded-lg shadow-2xl max-h-[92vh] overflow-y-auto">
         {/* Header */}
         <div className="sticky top-0 bg-[var(--background-elev)] z-10 flex items-center justify-between px-5 py-4 border-b border-[var(--border)]">
           <div>
             <h2 className="text-base font-semibold">📅 Registrar PT de Hunt</h2>
             <p className="text-[11px] text-[var(--text-mute)] mt-0.5">
-              {filledCount}/{SLOT_COUNT} chars · todos do mesmo servidor · 1 char
-              por player
+              {leaderChar
+                ? `${filledCount}/${SLOT_COUNT} chars · ${server}`
+                : "Escolha primeiro seu char líder"}
             </p>
           </div>
           <button
@@ -270,35 +275,82 @@ export function HuntPartyModal({ open, ownerId, onClose, onSuccess }: Props) {
 
         {/* Body */}
         <div className="p-5 space-y-5">
-          {/* Servidor */}
-          <div>
-            <label className="block text-xs uppercase tracking-wider text-[var(--text-dim)] mb-1.5">
-              Servidor *
+          {/* Step 1 — escolher líder */}
+          <section>
+            <label className="block text-xs uppercase tracking-wider text-[var(--text-dim)] mb-2">
+              1. Seu char líder *
             </label>
-            <select
-              value={server}
-              onChange={(e) => handleServerChange(e.target.value)}
-              disabled={loadingServers}
-              className="w-full bg-[var(--background)] border border-[var(--border-strong)] focus:border-[var(--accent)] rounded-md px-3 py-2 text-sm outline-none disabled:opacity-50"
-            >
-              <option value="">— escolha o servidor —</option>
-              {servers.map((s) => (
-                <option key={s.name} value={s.name}>
-                  {s.name} ({s.pvp})
-                </option>
-              ))}
-            </select>
-            <p className="text-[11px] text-[var(--text-dim)] mt-1">
-              Pode escolher antes ou simplesmente adicionar o 1º char — o servidor
-              é definido automaticamente.
+            <p className="text-[11px] text-[var(--text-mute)] mb-3">
+              O servidor da PT vem do char líder. Convidados precisam estar no
+              mesmo servidor.
             </p>
-          </div>
 
-          {/* Slots */}
-          <div>
+            {myChars === null ? (
+              <p className="text-xs text-[var(--text-mute)] py-3 text-center">
+                Carregando seus chars...
+              </p>
+            ) : myChars.length === 0 ? (
+              <div className="border border-dashed border-[var(--border-strong)] rounded-lg p-6 text-center text-sm text-[var(--text-mute)]">
+                Você ainda não tem nenhum personagem cadastrado. Vá em{" "}
+                <em>Meus personagens</em> e cadastre primeiro.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {myChars.map((c) => {
+                  const selected = c.id === leaderCharId;
+                  const vocColor =
+                    VOC_COLORS[c.vocation] ?? "text-[var(--text-mute)]";
+                  return (
+                    <button
+                      type="button"
+                      key={c.id}
+                      onClick={() => selectLeader(c.id)}
+                      className={`w-full flex items-center gap-3 p-3 rounded-lg border-[1.5px] text-left transition ${
+                        selected
+                          ? "border-[var(--accent)] bg-[var(--accent)]/6"
+                          : "border-[var(--border-strong)] bg-[var(--background)] hover:border-[var(--accent-dim)] hover:bg-[var(--background-elev-2)]"
+                      }`}
+                    >
+                      <span
+                        className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border border-[var(--border-strong)] bg-[var(--background-elev-2)] ${vocColor}`}
+                      >
+                        {c.vocation}
+                      </span>
+                      <span className="flex-1 min-w-0">
+                        <span className="block text-sm font-semibold truncate">
+                          {c.name}
+                        </span>
+                        <span className="block text-[11px] text-[var(--text-mute)]">
+                          Level {c.level} · {c.server}
+                        </span>
+                      </span>
+                      <span
+                        className={`w-[18px] h-[18px] rounded-full border-2 flex-shrink-0 relative ${
+                          selected
+                            ? "border-[var(--accent)]"
+                            : "border-[var(--border-strong)]"
+                        }`}
+                      >
+                        {selected && (
+                          <span className="absolute inset-[3px] rounded-full bg-[var(--accent)]" />
+                        )}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+
+          {/* Step 2 — convidar 4 chars */}
+          <section
+            className={
+              leaderChar ? "" : "opacity-50 pointer-events-none select-none"
+            }
+          >
             <div className="flex items-center justify-between mb-2">
               <label className="block text-xs uppercase tracking-wider text-[var(--text-dim)]">
-                Composição ({filledCount}/{SLOT_COUNT})
+                2. Convidar chars ({filledCount}/{SLOT_COUNT})
               </label>
               {filledCount > 0 && (
                 <span className="text-xs text-[var(--text-mute)]">
@@ -309,7 +361,40 @@ export function HuntPartyModal({ open, ownerId, onClose, onSuccess }: Props) {
             </div>
 
             <div className="space-y-2">
-              {slots.map((slot, idx) => {
+              {/* Slot do líder (read-only) */}
+              {leaderChar ? (
+                <div className="flex items-center gap-3 px-3 py-2.5 bg-[var(--accent)]/8 border border-[var(--accent)]/40 rounded-md text-sm">
+                  <span className="text-[10px] text-[var(--accent)] uppercase tracking-wider w-12 shrink-0 font-semibold">
+                    Líder
+                  </span>
+                  <span
+                    className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border border-[var(--border-strong)] bg-[var(--background-elev-2)] ${
+                      VOC_COLORS[leaderChar.vocation] ??
+                      "text-[var(--text-mute)]"
+                    }`}
+                  >
+                    {leaderChar.vocation}
+                  </span>
+                  <span className="flex-1 truncate font-medium">
+                    {leaderChar.name}
+                  </span>
+                  <span className="text-[var(--text-mute)] text-xs">
+                    lvl {leaderChar.level}
+                  </span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-3 px-3 py-2.5 border-2 border-dashed border-[var(--border-strong)] rounded-md text-sm text-[var(--text-dim)]">
+                  <span className="text-[10px] uppercase tracking-wider w-12 shrink-0 font-semibold">
+                    Líder
+                  </span>
+                  <span className="flex-1 text-left">
+                    Escolha o char líder acima
+                  </span>
+                </div>
+              )}
+
+              {/* Slots 1-4 */}
+              {otherSlots.map((slot, idx) => {
                 const active = pickingSlot === idx;
                 return (
                   <div key={idx}>
@@ -321,7 +406,6 @@ export function HuntPartyModal({ open, ownerId, onClose, onSuccess }: Props) {
                       onClear={() => clearSlot(idx)}
                     />
 
-                    {/* Picker inline embaixo do slot ativo */}
                     {active && (
                       <div className="mt-2 border border-[var(--accent)]/40 rounded-md bg-[var(--background)]/60 p-3">
                         <div className="flex items-center gap-2 mb-2">
@@ -342,41 +426,23 @@ export function HuntPartyModal({ open, ownerId, onClose, onSuccess }: Props) {
                           </button>
                         </div>
 
-                        {loadingChars ? (
+                        {loadingAllChars ? (
                           <p className="text-xs text-[var(--text-mute)] text-center py-3">
                             Carregando personagens...
                           </p>
                         ) : candidates.length === 0 ? (
                           <p className="text-xs text-[var(--text-mute)] text-center py-3">
-                            Nenhum char encontrado
-                            {server && (
-                              <>
-                                {" "}
-                                no servidor <strong>{server}</strong>
-                              </>
-                            )}
-                            .
+                            Nenhum char disponível em{" "}
+                            <strong>{server}</strong>.
                           </p>
                         ) : (
                           <div className="max-h-60 overflow-y-auto divide-y divide-[var(--border)]">
-                            {candidates.map(({ char, ownerConflict }) => (
+                            {candidates.map((char) => (
                               <button
                                 key={char.id}
                                 type="button"
-                                disabled={ownerConflict}
-                                onClick={() =>
-                                  !ownerConflict && assignChar(idx, char)
-                                }
-                                title={
-                                  ownerConflict
-                                    ? "Já tem outro char do mesmo player na PT"
-                                    : undefined
-                                }
-                                className={`w-full text-left flex items-center gap-3 px-2 py-1.5 text-sm rounded transition ${
-                                  ownerConflict
-                                    ? "opacity-40 cursor-not-allowed"
-                                    : "hover:bg-[var(--background-elev-2)]"
-                                }`}
+                                onClick={() => assignChar(idx, char)}
+                                className="w-full text-left flex items-center gap-3 px-2 py-1.5 text-sm rounded transition hover:bg-[var(--background-elev-2)]"
                               >
                                 <span
                                   className={`font-semibold w-8 ${
@@ -392,9 +458,6 @@ export function HuntPartyModal({ open, ownerId, onClose, onSuccess }: Props) {
                                 <span className="text-[var(--text-mute)] text-xs">
                                   lvl {char.level}
                                 </span>
-                                <span className="text-[var(--text-dim)] text-[10px] uppercase">
-                                  {char.server}
-                                </span>
                               </button>
                             ))}
                           </div>
@@ -405,7 +468,7 @@ export function HuntPartyModal({ open, ownerId, onClose, onSuccess }: Props) {
                 );
               })}
             </div>
-          </div>
+          </section>
 
           {/* Erro */}
           {error && (
@@ -416,7 +479,7 @@ export function HuntPartyModal({ open, ownerId, onClose, onSuccess }: Props) {
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-[var(--border)]">
+        <div className="sticky bottom-0 bg-[var(--background-elev)] flex items-center justify-end gap-2 px-5 py-4 border-t border-[var(--border)]">
           <button
             type="button"
             onClick={onClose}
@@ -462,7 +525,7 @@ function SlotRow({
         }`}
       >
         <span className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider w-12 shrink-0">
-          Slot {idx + 1}
+          Vaga {idx + 1}
         </span>
         <span
           className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border border-[var(--border-strong)] bg-[var(--background-elev-2)] ${
@@ -496,10 +559,10 @@ function SlotRow({
       }`}
     >
       <span className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider w-12 shrink-0 text-left">
-        Slot {idx + 1}
+        Vaga {idx + 1}
       </span>
       <span className="flex-1 text-left">
-        {active ? "Escolha um char abaixo..." : "+ Adicionar char"}
+        {active ? "Escolha um char abaixo..." : "+ Convidar char"}
       </span>
     </button>
   );
