@@ -103,6 +103,15 @@ export function AppSidebar({ mobileOpen = false, onClose }: Props) {
             badge="em breve"
             onClick={handleNavClick}
           />
+
+          <SectionLabel className="mt-5">Hunts</SectionLabel>
+          <SideLink
+            href="/hunts/planilhado"
+            icon="📅"
+            label="Planilhado"
+            active={pathname?.startsWith("/hunts/planilhado")}
+            onClick={handleNavClick}
+          />
         </nav>
 
         <div className="border-t border-[var(--border)] p-4">
