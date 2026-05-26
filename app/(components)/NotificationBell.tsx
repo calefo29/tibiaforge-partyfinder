@@ -24,6 +24,8 @@ type Props = {
   unreadCount: number;
   /** Posição do dropdown — left/right anchor. Default "right" (panel cresce pra esquerda). */
   anchor?: "left" | "right";
+  /** Título base da página — usado pra montar "(N) {pageTitle}". */
+  pageTitle?: string;
 };
 
 export function NotificationBell({
@@ -31,6 +33,7 @@ export function NotificationBell({
   items,
   unreadCount,
   anchor = "right",
+  pageTitle = "TibiaForge Party Finder",
 }: Props) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -54,17 +57,17 @@ export function NotificationBell({
     };
   }, [open]);
 
-  // Tab title piscando quando aba fora de foco + houver não-lidas
+  // Document.title: sempre injeta "(N) {pageTitle}" quando há não-lidas.
+  // Quando aba fica fora de foco, alterna com "🔔 (N) Atenção!" pra piscar.
   useEffect(() => {
     if (typeof document === "undefined") return;
-    const originalTitle = "TibiaForge Party Finder";
-    const reset = () => {
-      document.title = originalTitle;
-    };
-    if (unreadCount === 0) {
-      reset();
-      return;
-    }
+    const baseTitle = pageTitle;
+    const badgedTitle =
+      unreadCount > 0 ? `(${unreadCount}) ${baseTitle}` : baseTitle;
+    document.title = badgedTitle;
+
+    if (unreadCount === 0) return;
+
     let blinkOn = false;
     let intervalId: ReturnType<typeof setInterval> | null = null;
     const stopBlink = () => {
@@ -72,15 +75,13 @@ export function NotificationBell({
         clearInterval(intervalId);
         intervalId = null;
       }
-      reset();
+      document.title = badgedTitle;
     };
     const startBlink = () => {
       if (intervalId) return;
       intervalId = setInterval(() => {
         blinkOn = !blinkOn;
-        document.title = blinkOn
-          ? `🔔 (${unreadCount}) Atenção!`
-          : `(${unreadCount}) ${originalTitle}`;
+        document.title = blinkOn ? `🔔 (${unreadCount}) Atenção!` : badgedTitle;
       }, 1000);
     };
     const handleVisibility = () => {
@@ -91,9 +92,10 @@ export function NotificationBell({
     document.addEventListener("visibilitychange", handleVisibility);
     return () => {
       document.removeEventListener("visibilitychange", handleVisibility);
-      stopBlink();
+      if (intervalId) clearInterval(intervalId);
+      document.title = baseTitle;
     };
-  }, [unreadCount]);
+  }, [unreadCount, pageTitle]);
 
   const handleOpen = () => {
     setOpen((prev) => {

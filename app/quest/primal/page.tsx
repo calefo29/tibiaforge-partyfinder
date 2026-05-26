@@ -497,6 +497,7 @@ export default function PrimalHubPage() {
               items={notifItems}
               unreadCount={notifUnread}
               anchor="right"
+              pageTitle="The Primal Order"
             />
           </div>
 

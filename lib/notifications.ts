@@ -5,7 +5,6 @@ import {
   getDocs,
   limit,
   onSnapshot,
-  orderBy,
   query,
   serverTimestamp,
   Timestamp,
@@ -116,20 +115,24 @@ export function subscribeToUserNotifications(
   cb: (items: Notification[]) => void,
   onError?: (err: Error) => void
 ) {
-  // 30 mais recentes. Sem filtro de read no servidor pra evitar índice composto.
-  const q = query(
-    notifCol(),
-    where("userId", "==", userId),
-    orderBy("createdAt", "desc"),
-    limit(30)
-  );
+  // Sem orderBy no server pra evitar requerimento de índice composto
+  // (equality + orderBy em campos diferentes pede índice). Ordena no client.
+  const q = query(notifCol(), where("userId", "==", userId), limit(50));
   return onSnapshot(
     q,
     (snap) => {
       const list = snap.docs.map((d) => mapNotif(d));
-      cb(list);
+      list.sort((a, b) => {
+        const at = a.createdAt?.toMillis?.() ?? 0;
+        const bt = b.createdAt?.toMillis?.() ?? 0;
+        return bt - at;
+      });
+      cb(list.slice(0, 30));
     },
-    onError
+    (err) => {
+      console.error("subscribeToUserNotifications falhou:", err);
+      onError?.(err);
+    }
   );
 }
 
