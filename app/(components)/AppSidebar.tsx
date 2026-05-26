@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
+import { useUserNotifications } from "@/lib/use-user-notifications";
 import { Brand } from "./Brand";
 
 type Props = {
@@ -16,6 +17,12 @@ export function AppSidebar({ mobileOpen = false, onClose }: Props) {
   const pathname = usePathname();
   const router = useRouter();
   const { user, signOut } = useAuth();
+  const { items: notifItems } = useUserNotifications(user?.uid);
+
+  // Conta notifs nao-lidas por quest, baseado no link de cada notif.
+  const primalUnread = notifItems.filter(
+    (n) => !n.read && (n.link ?? "").startsWith("/quest/primal")
+  ).length;
 
   const handleLogout = async () => {
     await signOut();
@@ -93,6 +100,7 @@ export function AppSidebar({ mobileOpen = false, onClose }: Props) {
             icon="⚔️"
             label="The Primal Order"
             active={pathname?.startsWith("/quest/primal")}
+            notifCount={primalUnread}
             onClick={handleNavClick}
           />
           <SideLink
@@ -163,6 +171,7 @@ function SideLink({
   label,
   active,
   badge,
+  notifCount,
   onClick,
 }: {
   href: string;
@@ -170,6 +179,7 @@ function SideLink({
   label: string;
   active?: boolean;
   badge?: string;
+  notifCount?: number;
   onClick?: () => void;
 }) {
   return (
@@ -184,6 +194,14 @@ function SideLink({
     >
       <span className="text-base leading-none">{icon}</span>
       <span className="flex-1 truncate">{label}</span>
+      {notifCount && notifCount > 0 ? (
+        <span
+          className="min-w-[18px] h-[18px] px-1 rounded-full bg-[var(--danger)] text-white text-[10px] font-bold flex items-center justify-center leading-none"
+          aria-label={`${notifCount} notificação(ões) não lida(s)`}
+        >
+          {notifCount > 9 ? "9+" : notifCount}
+        </span>
+      ) : null}
       {badge && (
         <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-[var(--background-elev-2)] border border-[var(--border-strong)] text-[var(--text-dim)]">
           {badge}
