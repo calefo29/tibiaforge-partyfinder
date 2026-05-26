@@ -292,14 +292,15 @@ export function checkCandidateForSlot(
   if (party.slots.some((s) => s.confirmed?.characterId === cand.characterId))
     return { ok: false, reason: "Char já está nessa PT" };
 
-  // Char já se candidatou ou foi convidado pra esta vaga específica?
-  if (slot.applicants.some((a) => a.characterId === cand.characterId))
+  // Mesmo char já candidatado ou convidado em QUALQUER vaga desta PT?
+  if (party.slots.some((s) => s.applicants.some((a) => a.characterId === cand.characterId)))
     return { ok: false, reason: "Você já se candidatou" };
-  if (slot.invites.some((i) => i.characterId === cand.characterId))
+  if (party.slots.some((s) => s.invites.some((i) => i.characterId === cand.characterId)))
     return { ok: false, reason: "Convite já enviado" };
 
-  // 1 char por player na MESMA PT: se outro char desse mesmo dono já está
-  // confirmado, bloqueia (applicants/invites pendentes não bloqueiam).
+  // 1 char por player na MESMA PT: só bloqueia se já tem CONFIRMED do mesmo
+  // dono. Múltiplos pendings (apply/invite) são permitidos — quando um deles
+  // virar confirmed, os outros caem via stripOwnerPendings.
   if (party.slots.some((s) => s.confirmed?.ownerId === cand.ownerId))
     return { ok: false, reason: "Você já tem um char nessa PT" };
 
@@ -534,6 +535,23 @@ function confirmedEntry(pending: SlotEntry): SlotEntry {
 }
 
 /**
+ * Após confirmar um char na PT, remove em todos os slots quaisquer
+ * applicants/invites pendentes do mesmo player (ownerId), garantindo a
+ * regra de 1 char por player. Não mexe em confirmed nem no slot atual.
+ */
+function stripOwnerPendings(slots: Slot[], ownerId: string, skipIndex: number): Slot[] {
+  return slots.map((s) => {
+    if (s.index === skipIndex) return s;
+    const apps = s.applicants.filter((a) => a.ownerId !== ownerId);
+    const invs = s.invites.filter((i) => i.ownerId !== ownerId);
+    if (apps.length === s.applicants.length && invs.length === s.invites.length) {
+      return s;
+    }
+    return { ...s, applicants: apps, invites: invs };
+  });
+}
+
+/**
  * Player se candidata a uma vaga. Se já há invite pendente pra esse char na
  * mesma vaga, vira confirmed imediatamente (cross-match).
  */
@@ -551,6 +569,15 @@ export async function applyToSlot(
   if (slot.confirmed) throw new Error("Vaga já preenchida.");
   if (slot.applicants.some((a) => a.characterId === characterId)) {
     throw new Error("Você já se candidatou nessa vaga.");
+  }
+
+  // 1 char por player: só bloqueia se já tem CONFIRMED do mesmo dono na PT.
+  // Múltiplos pendings são permitidos; sweep acontece no confirm.
+  const ownerAlreadyConfirmed = party.slots.some(
+    (s) => s.confirmed?.ownerId === ownerId && s.confirmed.characterId !== characterId
+  );
+  if (ownerAlreadyConfirmed) {
+    throw new Error("Você já tem outro char confirmado nessa PT.");
   }
 
   const matchingInvite = slot.invites.find((i) => i.characterId === characterId);
@@ -572,7 +599,10 @@ export async function applyToSlot(
       applicants: [...slot.applicants, entry],
     };
   }
-  const slots = party.slots.map((s) => (s.index === slotIndex ? newSlot : s));
+  let slots = party.slots.map((s) => (s.index === slotIndex ? newSlot : s));
+  if (matchingInvite) {
+    slots = stripOwnerPendings(slots, ownerId, slotIndex);
+  }
   await updateDoc(doc(db, "primalParties", partyId), {
     slots: slots.map(serializeSlot),
     updatedAt: serverTimestamp(),
@@ -638,6 +668,16 @@ export async function inviteToSlot(
     throw new Error("Vocação não compatível com a vaga.");
   }
 
+  // 1 char por player: só bloqueia se já tem CONFIRMED do mesmo dono na PT.
+  // Convidar múltiplos chars do mesmo player é permitido — o primeiro a virar
+  // confirmed ganha e os demais pendings caem via stripOwnerPendings.
+  const ownerAlreadyConfirmed = party.slots.some(
+    (s) => s.confirmed?.ownerId === ownerId && s.confirmed.characterId !== characterId
+  );
+  if (ownerAlreadyConfirmed) {
+    throw new Error("Esse player já tem outro char confirmado nessa PT.");
+  }
+
   const matchingApply = slot.applicants.find((a) => a.characterId === characterId);
   let newSlot: Slot;
   if (matchingApply) {
@@ -658,7 +698,10 @@ export async function inviteToSlot(
       invites: [...slot.invites, entry],
     };
   }
-  const slots = party.slots.map((s) => (s.index === slotIndex ? newSlot : s));
+  let slots = party.slots.map((s) => (s.index === slotIndex ? newSlot : s));
+  if (matchingApply) {
+    slots = stripOwnerPendings(slots, ownerId, slotIndex);
+  }
   await updateDoc(doc(db, "primalParties", partyId), {
     slots: slots.map(serializeSlot),
     updatedAt: serverTimestamp(),
@@ -751,7 +794,8 @@ export async function acceptApplication(
     confirmed: confirmedEntry(applicant),
     entry: confirmedEntry(applicant),
   };
-  const slots = party.slots.map((s) => (s.index === slotIndex ? newSlot : s));
+  let slots = party.slots.map((s) => (s.index === slotIndex ? newSlot : s));
+  slots = stripOwnerPendings(slots, applicant.ownerId, slotIndex);
   await updateDoc(doc(db, "primalParties", partyId), {
     slots: slots.map(serializeSlot),
     updatedAt: serverTimestamp(),
@@ -793,7 +837,8 @@ export async function acceptInvite(
     confirmed: confirmedEntry(invite),
     entry: confirmedEntry(invite),
   };
-  const slots = party.slots.map((s) => (s.index === slotIndex ? newSlot : s));
+  let slots = party.slots.map((s) => (s.index === slotIndex ? newSlot : s));
+  slots = stripOwnerPendings(slots, invite.ownerId, slotIndex);
   await updateDoc(doc(db, "primalParties", partyId), {
     slots: slots.map(serializeSlot),
     updatedAt: serverTimestamp(),
