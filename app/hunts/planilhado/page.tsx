@@ -75,46 +75,61 @@ export default function PlanilhadoPage() {
   };
 
   /**
-   * DEV: cria 1 PT de teste com 5 chars random de Auroria, owners distintos.
-   * Útil pra simular volume sem clicar slot por slot. OwnerId é o do primeiro char
-   * sorteado, pra que a PT tenha um "dono" coerente.
+   * DEV: cria 1 PT de teste com 5 members em Auroria. Usa chars reais quando
+   * disponíveis e completa o restante com dummies sintéticos (dummy_*) — assim
+   * o botão funciona mesmo sem 5 owners distintos cadastrados. OwnerId da PT
+   * fica como o do admin (currentUid) pra ele conseguir gerenciar/deletar.
    */
   const handleSeedRandomParty = async () => {
     setSeedError(null);
     setSeedingDev(true);
     try {
+      if (!user) throw new Error("Não autenticado.");
       const allChars = await fetchAllCharactersOnce();
       const auroria = allChars.filter((c) => c.server === "Auroria");
-      if (auroria.length < HUNT_PARTY_MIN_SIZE) {
-        throw new Error(
-          `Só ${auroria.length} chars em Auroria. Precisa de ao menos ${HUNT_PARTY_MIN_SIZE} de owners diferentes.`
-        );
-      }
-      // Embaralha e pega 1 char por owner até completar a PT
+
+      // Pega até 5 chars reais com owners distintos
       const shuffled = [...auroria].sort(() => Math.random() - 0.5);
-      const picked: typeof auroria = [];
+      const picked: HuntPartyMember[] = [];
       const seenOwners = new Set<string>();
       for (const c of shuffled) {
         if (seenOwners.has(c.ownerId)) continue;
-        picked.push(c);
+        picked.push({
+          characterId: c.id,
+          ownerId: c.ownerId,
+          name: c.name,
+          vocation: c.vocation,
+          level: c.level,
+        });
         seenOwners.add(c.ownerId);
         if (picked.length >= HUNT_PARTY_MIN_SIZE) break;
       }
-      if (picked.length < HUNT_PARTY_MIN_SIZE) {
-        throw new Error(
-          `Auroria só tem ${picked.length} owners distintos. Cadastre chars de mais players.`
-        );
+
+      // Completa com dummies sintéticos até atingir HUNT_PARTY_MIN_SIZE
+      const FAKE_NAMES = [
+        "Bagunça", "Daxto", "Xulipa", "Erebos", "Gnomo", "Soxinha",
+        "Renno", "Faisca", "Korben", "Vortek", "Ziggu", "Mauron",
+      ];
+      const FAKE_VOCS: HuntPartyMember["vocation"][] = ["EK", "ED", "RP", "MS", "EM"];
+      while (picked.length < HUNT_PARTY_MIN_SIZE) {
+        const stamp = `${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+        const name =
+          FAKE_NAMES[Math.floor(Math.random() * FAKE_NAMES.length)] +
+          " " + String(Math.floor(Math.random() * 99));
+        const voc = FAKE_VOCS[Math.floor(Math.random() * FAKE_VOCS.length)];
+        const level = 700 + Math.floor(Math.random() * 600); // 700-1300
+        picked.push({
+          characterId: `dummy_char_${stamp}`,
+          ownerId: `dummy_owner_${stamp}`,
+          name,
+          vocation: voc,
+          level,
+        });
       }
-      const members: HuntPartyMember[] = picked.map((c) => ({
-        characterId: c.id,
-        ownerId: c.ownerId,
-        name: c.name,
-        vocation: c.vocation,
-        level: c.level,
-      }));
-      await createHuntParty(picked[0].ownerId, {
+
+      await createHuntParty(user.uid, {
         server: "Auroria",
-        members,
+        members: picked,
       });
     } catch (err) {
       console.error("[seedDev]", err);
@@ -489,6 +504,7 @@ function PartiesView({
               key={p.id}
               party={p}
               currentUid={currentUid}
+              isAdmin={isAdmin}
               onDelete={() => onDelete(p.id)}
               deleting={deletingId === p.id}
             />
@@ -502,16 +518,19 @@ function PartiesView({
 function HuntPartyCard({
   party,
   currentUid,
+  isAdmin,
   onDelete,
   deleting,
 }: {
   party: HuntParty;
   currentUid: string;
+  isAdmin: boolean;
   onDelete: () => void;
   deleting: boolean;
 }) {
   const isOwner = party.ownerId === currentUid;
   const imIn = party.members.some((m) => m.ownerId === currentUid);
+  const canDelete = isOwner || isAdmin;
 
   return (
     <div className="bg-[var(--background-elev)] border border-[var(--border)] rounded-lg p-4">
@@ -540,12 +559,13 @@ function HuntPartyCard({
             </span>
           )}
         </div>
-        {isOwner && (
+        {canDelete && (
           <button
             type="button"
             onClick={onDelete}
             disabled={deleting}
             className="text-xs text-[var(--text-mute)] hover:text-red-400 border border-[var(--border-strong)] hover:border-red-400/40 rounded-md px-2.5 py-1 transition disabled:opacity-50 shrink-0"
+            title={!isOwner ? "Admin: deletar PT alheia" : "Deletar PT"}
           >
             {deleting ? "Deletando..." : "Deletar"}
           </button>
