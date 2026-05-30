@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { Character, subscribeToUserCharacters } from "@/lib/characters";
@@ -46,6 +46,23 @@ import {
 } from "@/app/(components)/SimpleFilters";
 import type { Vocation } from "@/lib/characters";
 
+// Next 16 exige Suspense ao redor de qualquer client component que use
+// useSearchParams (pra suportar streaming SSR sem bail-out). O default
+// export é só o wrapper com Suspense; a página real é o PrimalHubInner.
+export default function PrimalHubPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="min-h-screen flex items-center justify-center">
+          <p className="text-[var(--text-mute)] text-sm">Carregando…</p>
+        </main>
+      }
+    >
+      <PrimalHubInner />
+    </Suspense>
+  );
+}
+
 const VOC_COLORS: Record<string, string> = {
   EK: "text-[#fbbf24]",
   ED: "text-[#4ade80]",
@@ -54,7 +71,7 @@ const VOC_COLORS: Record<string, string> = {
   EM: "text-[#22d3ee]",
 };
 
-export default function PrimalHubPage() {
+function PrimalHubInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user, loading } = useAuth();
