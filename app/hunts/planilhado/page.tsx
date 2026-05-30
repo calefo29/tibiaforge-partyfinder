@@ -572,7 +572,7 @@ function HuntPartyCard({
         )}
       </div>
 
-      <div className="grid grid-cols-5 gap-1.5 max-w-[224px]">
+      <div className="grid grid-cols-5 gap-1.5">
         {(() => {
           const PARTY_CAP = 5;
           // Líder (ownerId == party.ownerId) sempre primeiro
@@ -592,7 +592,7 @@ function HuntPartyCard({
             return (
               <div
                 key={m.characterId}
-                className={`flex flex-col items-center justify-center gap-0.5 aspect-square px-1 py-1.5 border rounded text-[11px] ${
+                className={`flex flex-col items-center justify-center gap-0.5 h-10 px-1 py-1 border rounded text-[11px] ${
                   isMine
                     ? "bg-[var(--accent)]/8 border-[var(--accent)]/30"
                     : "bg-[var(--background)]/50 border-[var(--border)]"
@@ -630,7 +630,7 @@ function HuntPartyCard({
             cells.push(
               <div
                 key={`lock_${i}`}
-                className="flex items-center justify-center aspect-square border border-dashed border-[var(--border)] rounded bg-[var(--background)]/20 text-[var(--text-dim)]/60"
+                className="flex items-center justify-center h-10 border border-dashed border-[var(--border)] rounded bg-[var(--background)]/20 text-[var(--text-dim)]/60"
                 title="Vaga aberta"
                 aria-label="Vaga aberta"
               >
