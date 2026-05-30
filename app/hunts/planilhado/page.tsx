@@ -531,13 +531,17 @@ function HuntPartyCard({
   const isOwner = party.ownerId === currentUid;
   const imIn = party.members.some((m) => m.ownerId === currentUid);
   const canDelete = isOwner || isAdmin;
+  const leader = party.members.find((m) => m.ownerId === party.ownerId);
 
   return (
     <div className="bg-[var(--background-elev)] border border-[var(--border)] rounded-lg p-4">
       <div className="flex items-start justify-between gap-3 mb-3">
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-xs uppercase tracking-wider text-[var(--text-dim)] font-semibold">
-            {party.server}
+          <span className="text-sm font-semibold text-[var(--text)]">
+            {leader ? leader.name : "PT sem líder"}{" "}
+            <span className="text-xs uppercase tracking-wider text-[var(--text-dim)] font-normal">
+              ({party.server})
+            </span>
           </span>
           <span className="text-xs text-[var(--text-mute)]">
             · {party.members.length} chars
@@ -592,7 +596,7 @@ function HuntPartyCard({
             return (
               <div
                 key={m.characterId}
-                className={`flex items-center gap-1.5 h-9 px-2 border rounded text-[11px] ${
+                className={`flex items-center gap-1.5 h-12 px-2.5 border rounded text-xs ${
                   isMine
                     ? "bg-[var(--accent)]/8 border-[var(--accent)]/30"
                     : "bg-[var(--background)]/50 border-[var(--border)]"
@@ -626,7 +630,7 @@ function HuntPartyCard({
             cells.push(
               <div
                 key={`lock_${i}`}
-                className="flex items-center justify-center h-9 border border-dashed border-[var(--border)] rounded bg-[var(--background)]/20 text-[var(--text-dim)]/60"
+                className="flex items-center justify-center h-12 border border-dashed border-[var(--border)] rounded bg-[var(--background)]/20 text-[var(--text-dim)]/60"
                 title="Vaga aberta"
                 aria-label="Vaga aberta"
               >
