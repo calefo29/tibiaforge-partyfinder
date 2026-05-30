@@ -24,7 +24,7 @@ import {
   nextServerSave,
   SuggestionStatus,
 } from "@/lib/primal-suggestions";
-import { createNotificationsBulk } from "@/lib/notifications";
+import { buildPrimalNotifLink, createNotificationsBulk } from "@/lib/notifications";
 
 // Vercel Cron entrega GET com Authorization: Bearer <CRON_SECRET>
 export async function GET(req: NextRequest) {
@@ -151,7 +151,7 @@ export async function GET(req: NextRequest) {
           type: "suggestion_new",
           title: "PT aleatória formada!",
           body: `Você foi sorteado pra uma PT no ${server}. Avalie e aceite/recuse até o próximo SS.`,
-          link: "/quest/primal",
+          link: buildPrimalNotifLink({ type: "suggestion_new", suggestionId: ref.id }),
           meta: { suggestionId: ref.id, server },
         });
       }

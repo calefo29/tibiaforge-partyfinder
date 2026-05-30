@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { Character, subscribeToUserCharacters } from "@/lib/characters";
 import {
@@ -56,10 +56,19 @@ const VOC_COLORS: Record<string, string> = {
 
 export default function PrimalHubPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { user, loading } = useAuth();
 
   type Tab = "pool" | "pts" | "sugestao" | "minhas";
   const [tab, setTab] = useState<Tab>("pool");
+
+  // Highlight de PT alvo via query params (?partyId=X&slot=N&tab=Y).
+  // Set quando navegamos via notif; limpo após scroll+animação.
+  const [highlightTarget, setHighlightTarget] = useState<{
+    partyId: string;
+    slotIndex?: number;
+  } | null>(null);
+  const consumedParamsRef = useRef(false);
   const [chars, setChars] = useState<Character[] | null>(null);
   const [pool, setPool] = useState<PrimalPoolEntry[] | null>(null);
   const [allParties, setAllParties] = useState<PrimalParty[] | null>(null);
@@ -93,6 +102,67 @@ export default function PrimalHubPage() {
   useEffect(() => {
     if (!loading && !user) router.replace("/login");
   }, [user, loading, router]);
+
+  // Lê query params da notif (?tab=X&partyId=Y&slot=N) UMA vez ao montar.
+  // Set tab + highlight target. Não limpa URL aqui — o effect de scroll
+  // limpa depois que conseguir achar e rolar até o card.
+  useEffect(() => {
+    if (consumedParamsRef.current) return;
+    const tabParam = searchParams?.get("tab");
+    const partyId = searchParams?.get("partyId");
+    const slotStr = searchParams?.get("slot");
+    if (!tabParam && !partyId) return;
+    consumedParamsRef.current = true;
+    if (
+      tabParam === "pool" ||
+      tabParam === "pts" ||
+      tabParam === "sugestao" ||
+      tabParam === "minhas"
+    ) {
+      setTab(tabParam);
+    }
+    if (partyId) {
+      const slotIndex = slotStr != null ? Number(slotStr) : undefined;
+      setHighlightTarget({
+        partyId,
+        slotIndex: Number.isFinite(slotIndex) ? slotIndex : undefined,
+      });
+    }
+  }, [searchParams]);
+
+  // Quando o highlight target existe, espera o card aparecer no DOM e rola
+  // até ele. Limpa target + URL após ~3s (tempo da animação de pulse).
+  useEffect(() => {
+    if (!highlightTarget) return;
+    let cancelled = false;
+    let cleanupTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const tryScroll = () => {
+      if (cancelled) return;
+      const el = document.querySelector(
+        `[data-party-id="${highlightTarget.partyId}"]`
+      );
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        cleanupTimer = setTimeout(() => {
+          if (cancelled) return;
+          setHighlightTarget(null);
+          // Limpa query params sem disparar reload.
+          router.replace("/quest/primal", { scroll: false });
+        }, 3200);
+      } else {
+        // Card ainda não renderizou (subscribe não chegou). Tenta de novo.
+        setTimeout(tryScroll, 200);
+      }
+    };
+    // Pequeno atraso pra dar tempo do tab trocar e renderizar.
+    const initial = setTimeout(tryScroll, 150);
+    return () => {
+      cancelled = true;
+      clearTimeout(initial);
+      if (cleanupTimer) clearTimeout(cleanupTimer);
+    };
+  }, [highlightTarget, router]);
 
   useEffect(() => {
     if (!user) return;
@@ -714,6 +784,7 @@ export default function PrimalHubPage() {
                       hostChar={charsById.get(p.hostCharacterId) ?? null}
                       lockedCharIds={lockedCharIds}
                       onEdit={() => setEditingParty(p)}
+                      highlight={highlightTarget?.partyId === p.id}
                     />
                   ))}
                 </div>
@@ -788,6 +859,7 @@ export default function PrimalHubPage() {
                       charById={charsById}
                       hostChar={charsById.get(p.hostCharacterId) ?? null}
                       lockedCharIds={lockedCharIds}
+                      highlight={highlightTarget?.partyId === p.id}
                     />
                   ))}
                 </div>
@@ -859,6 +931,7 @@ export default function PrimalHubPage() {
                         allPool={allPool ?? []}
                         charById={charsById}
                         hostChar={charsById.get(p.hostCharacterId) ?? null}
+                        highlight={highlightTarget?.partyId === p.id}
                       />
                     ))}
                   </div>

@@ -51,6 +51,8 @@ type Props = {
   hostChar: Character | null;
   lockedCharIds?: Set<string>;
   onEdit?: () => void;
+  /** Quando true, anima pulse no border por ~3s pra destacar (vindo via notif). */
+  highlight?: boolean;
 };
 
 export function PartyCard({
@@ -63,6 +65,7 @@ export function PartyCard({
   hostChar,
   lockedCharIds,
   onEdit,
+  highlight,
 }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -118,13 +121,14 @@ export function PartyCard({
 
   return (
     <div
+      data-party-id={party.id}
       className={`bg-[var(--background-elev)] border rounded-xl p-4 transition ${
         isClosed
           ? "border-[var(--ok)]/40"
           : isCancelled
             ? "border-[var(--border)] opacity-60"
             : "border-[var(--border)] hover:border-[var(--accent-dim)]"
-      }`}
+      } ${highlight ? "ring-2 ring-[var(--accent)] animate-pulse" : ""}`}
       style={progressBg ? { backgroundImage: progressBg } : undefined}
     >
       <div className="flex items-start justify-between gap-3 mb-3 flex-wrap">

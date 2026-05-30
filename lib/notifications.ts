@@ -25,6 +25,50 @@ export type NotificationType =
   | "suggestion_new" // player: PT aleatória formada, avalie
   | "suggestion_closing_soon"; // player: faltam ~3h e você não aceitou ainda
 
+/**
+ * Mapeia notif type → tab da página da Primal. Usado pelo link da notif pra
+ * abrir a página já no tab certo + scroll/highlight do alvo.
+ *
+ * - apply_received / invite_accepted: ações chegam pro HOST → tab "minhas"
+ * - invite_received / application_accepted: ações chegam pro PLAYER → "pts"
+ * - party_closed: PT em que o player é membro (não host) → tab "pts"
+ * - suggestion_*: PT aleatória → tab "sugestao"
+ */
+export type PrimalTab = "pool" | "pts" | "sugestao" | "minhas";
+
+export function primalTabForNotif(type: NotificationType): PrimalTab {
+  switch (type) {
+    case "apply_received":
+    case "invite_accepted":
+      return "minhas";
+    case "invite_received":
+    case "application_accepted":
+    case "party_closed":
+      return "pts";
+    case "suggestion_new":
+    case "suggestion_closing_soon":
+      return "sugestao";
+  }
+}
+
+/**
+ * Monta o link de uma notif da Primal com query params para a página
+ * navegar até o contexto exato (tab + PT + slot) e aplicar highlight.
+ */
+export function buildPrimalNotifLink(input: {
+  type: NotificationType;
+  partyId?: string;
+  slotIndex?: number;
+  suggestionId?: string;
+}): string {
+  const params = new URLSearchParams();
+  params.set("tab", primalTabForNotif(input.type));
+  if (input.partyId) params.set("partyId", input.partyId);
+  if (typeof input.slotIndex === "number") params.set("slot", String(input.slotIndex));
+  if (input.suggestionId) params.set("suggestionId", input.suggestionId);
+  return `/quest/primal?${params.toString()}`;
+}
+
 export type Notification = {
   id: string;
   userId: string; // recipient

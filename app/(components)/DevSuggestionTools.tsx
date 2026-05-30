@@ -30,7 +30,7 @@ import {
   SuggestionSlot,
   SuggestionStatus,
 } from "@/lib/primal-suggestions";
-import { createNotificationsBulk } from "@/lib/notifications";
+import { buildPrimalNotifLink, createNotificationsBulk } from "@/lib/notifications";
 import { useAuth } from "@/lib/auth-context";
 
 const FAKE_NAMES = [
@@ -290,7 +290,7 @@ export function DevSuggestionTools() {
               type: "suggestion_new",
               title: "PT aleatória formada!",
               body: `Você foi sorteado pra uma PT no ${server}. Avalie e aceite/recuse até o próximo SS.`,
-              link: "/quest/primal",
+              link: buildPrimalNotifLink({ type: "suggestion_new", suggestionId: ref.id }),
               meta: { suggestionId: ref.id, server },
             });
             notified += ownerIds.length;
@@ -510,7 +510,7 @@ export function DevSuggestionTools() {
           type: "suggestion_new",
           title: "PT aleatória formada!",
           body: `Você foi sorteado pra uma PT no ${myEntry.server}.`,
-          link: "/quest/primal",
+          link: buildPrimalNotifLink({ type: "suggestion_new", suggestionId: ref.id }),
           meta: { suggestionId: ref.id, server: myEntry.server },
         });
       }

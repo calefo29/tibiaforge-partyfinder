@@ -9,7 +9,7 @@ import {
   where,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { createNotificationsBulk } from "@/lib/notifications";
+import { buildPrimalNotifLink, createNotificationsBulk } from "@/lib/notifications";
 
 // Roda a ~3h antes do próximo SS (10h UTC = 07h BRT, SS é 13h UTC).
 // Dispara alerta "faltando 3h" pros players que ainda não aceitaram a sugestão.
@@ -63,7 +63,7 @@ export async function GET(req: NextRequest) {
       type: "suggestion_closing_soon",
       title: "⏰ Faltam ~3h pra fechar!",
       body: `Você ainda não aceitou a PT aleatória no ${data.server ?? "seu mundo"}. Confirme ou ela vai expirar.`,
-      link: "/quest/primal",
+      link: buildPrimalNotifLink({ type: "suggestion_closing_soon", suggestionId: d.id }),
       meta: { suggestionId: d.id, server: data.server ?? "" },
     });
 

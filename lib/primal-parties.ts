@@ -14,9 +14,11 @@ import {
 import { db } from "./firebase";
 import { Character, Vocation } from "./characters";
 import { PrimalPoolEntry, Turno } from "./primal-pool";
-import { createNotification, createNotificationsBulk } from "./notifications";
-
-const NOTIF_LINK = "/quest/primal";
+import {
+  buildPrimalNotifLink,
+  createNotification,
+  createNotificationsBulk,
+} from "./notifications";
 
 export const PRIMAL_PARTY_SIZE = 5;
 export const PRIMAL_PARTY_MIN_LEVEL = 600;
@@ -618,7 +620,7 @@ export async function applyToSlot(
         type: "invite_accepted",
         title: "Convite confirmado (cross-match)",
         body: `${playerName} se candidatou e cruzou com seu convite — vaga ${slotIndex + 1} fechada.`,
-        link: NOTIF_LINK,
+        link: buildPrimalNotifLink({ type: "invite_accepted", partyId, slotIndex }),
         meta: { partyId, slotIndex },
       });
     }
@@ -628,7 +630,7 @@ export async function applyToSlot(
         type: "application_accepted",
         title: "Confirmado na PT!",
         body: `Sua candidatura cruzou com um convite do host — você está confirmado na vaga ${slotIndex + 1}.`,
-        link: NOTIF_LINK,
+        link: buildPrimalNotifLink({ type: "application_accepted", partyId, slotIndex }),
         meta: { partyId, slotIndex },
       });
     }
@@ -639,7 +641,7 @@ export async function applyToSlot(
       type: "apply_received",
       title: "Nova candidatura",
       body: `${playerName} se candidatou na vaga ${slotIndex + 1} da sua PT.`,
-      link: NOTIF_LINK,
+      link: buildPrimalNotifLink({ type: "apply_received", partyId, slotIndex }),
       meta: { partyId, slotIndex },
     });
   }
@@ -718,7 +720,7 @@ export async function inviteToSlot(
         type: "application_accepted",
         title: "Confirmado na PT!",
         body: `Seu convite cruzou com uma candidatura existente — você está confirmado na vaga ${slotIndex + 1}.`,
-        link: NOTIF_LINK,
+        link: buildPrimalNotifLink({ type: "application_accepted", partyId, slotIndex }),
         meta: { partyId, slotIndex },
       });
     }
@@ -728,7 +730,7 @@ export async function inviteToSlot(
         type: "invite_accepted",
         title: "Convite confirmado (cross-match)",
         body: `${playerName} já tinha se candidatado — vaga ${slotIndex + 1} fechada.`,
-        link: NOTIF_LINK,
+        link: buildPrimalNotifLink({ type: "invite_accepted", partyId, slotIndex }),
         meta: { partyId, slotIndex },
       });
     }
@@ -739,7 +741,7 @@ export async function inviteToSlot(
       type: "invite_received",
       title: "Convite recebido",
       body: `${hostName} te convidou pra vaga ${slotIndex + 1}.`,
-      link: NOTIF_LINK,
+      link: buildPrimalNotifLink({ type: "invite_received", partyId, slotIndex }),
       meta: { partyId, slotIndex },
     });
   }
@@ -809,7 +811,7 @@ export async function acceptApplication(
       type: "application_accepted",
       title: "Candidatura aceita!",
       body: `${hostName} aceitou sua candidatura na vaga ${slotIndex + 1}.`,
-      link: NOTIF_LINK,
+      link: buildPrimalNotifLink({ type: "application_accepted", partyId, slotIndex }),
       meta: { partyId, slotIndex },
     });
   }
@@ -852,7 +854,7 @@ export async function acceptInvite(
       type: "invite_accepted",
       title: "Convite aceito",
       body: `${playerName} aceitou seu convite (vaga ${slotIndex + 1}).`,
-      link: NOTIF_LINK,
+      link: buildPrimalNotifLink({ type: "invite_accepted", partyId, slotIndex }),
       meta: { partyId, slotIndex },
     });
   }
@@ -1270,7 +1272,7 @@ export async function closePartyAndLock(partyId: string, party: PrimalParty) {
       type: "party_closed",
       title: "PT fechada!",
       body: `A PT do ${hostName} foi fechada com todos os players confirmados.`,
-      link: NOTIF_LINK,
+      link: buildPrimalNotifLink({ type: "party_closed", partyId }),
       meta: { partyId },
     });
   }
