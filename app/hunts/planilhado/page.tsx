@@ -573,29 +573,52 @@ function HuntPartyCard({
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5">
-        {party.members.map((m) => {
-          const isMine = m.ownerId === currentUid;
-          return (
-            <div
-              key={m.characterId}
-              className={`flex items-center gap-2 px-2.5 py-1.5 border rounded text-xs ${
-                isMine
-                  ? "bg-[var(--accent)]/8 border-[var(--accent)]/30"
-                  : "bg-[var(--background)]/50 border-[var(--border)]"
-              }`}
-            >
-              <span
-                className={`font-semibold w-7 ${
-                  VOC_COLORS[m.vocation] ?? "text-[var(--text-mute)]"
+        {/* Líder (ownerId == party.ownerId) sempre primeiro */}
+        {(() => {
+          const leaderIdx = party.members.findIndex(
+            (m) => m.ownerId === party.ownerId
+          );
+          const ordered =
+            leaderIdx >= 0
+              ? [
+                  party.members[leaderIdx],
+                  ...party.members.filter((_, i) => i !== leaderIdx),
+                ]
+              : party.members;
+          return ordered.map((m) => {
+            const isMine = m.ownerId === currentUid;
+            const isLeader = m.ownerId === party.ownerId;
+            return (
+              <div
+                key={m.characterId}
+                className={`flex items-center gap-2 px-2.5 py-1.5 border rounded text-xs ${
+                  isMine
+                    ? "bg-[var(--accent)]/8 border-[var(--accent)]/30"
+                    : "bg-[var(--background)]/50 border-[var(--border)]"
                 }`}
               >
-                {m.vocation}
-              </span>
-              <span className="flex-1 truncate">{m.name}</span>
-              <span className="text-[var(--text-mute)]">{m.level}</span>
-            </div>
-          );
-        })}
+                {isLeader && (
+                  <span
+                    className="text-sm leading-none"
+                    title="Líder da PT"
+                    aria-label="Líder"
+                  >
+                    👑
+                  </span>
+                )}
+                <span
+                  className={`font-semibold w-7 ${
+                    VOC_COLORS[m.vocation] ?? "text-[var(--text-mute)]"
+                  }`}
+                >
+                  {m.vocation}
+                </span>
+                <span className="flex-1 truncate">{m.name}</span>
+                <span className="text-[var(--text-mute)]">{m.level}</span>
+              </div>
+            );
+          });
+        })()}
       </div>
     </div>
   );
