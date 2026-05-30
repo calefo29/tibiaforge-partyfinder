@@ -572,7 +572,7 @@ function HuntPartyCard({
         )}
       </div>
 
-      <div className="grid grid-cols-5 gap-1.5 max-w-[560px]">
+      <div className="grid grid-cols-5 gap-1.5 max-w-[224px]">
         {(() => {
           const PARTY_CAP = 5;
           // Líder (ownerId == party.ownerId) sempre primeiro
