@@ -572,9 +572,10 @@ function HuntPartyCard({
         )}
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5">
-        {/* Líder (ownerId == party.ownerId) sempre primeiro */}
+      <div className="grid grid-cols-5 gap-1.5">
         {(() => {
+          const PARTY_CAP = 5;
+          // Líder (ownerId == party.ownerId) sempre primeiro
           const leaderIdx = party.members.findIndex(
             (m) => m.ownerId === party.ownerId
           );
@@ -585,39 +586,59 @@ function HuntPartyCard({
                   ...party.members.filter((_, i) => i !== leaderIdx),
                 ]
               : party.members;
-          return ordered.map((m) => {
+          const cells: React.ReactNode[] = ordered.map((m) => {
             const isMine = m.ownerId === currentUid;
             const isLeader = m.ownerId === party.ownerId;
             return (
               <div
                 key={m.characterId}
-                className={`flex items-center gap-2 px-2.5 py-1.5 border rounded text-xs ${
+                className={`flex flex-col items-center justify-center gap-0.5 aspect-square px-1 py-1.5 border rounded text-[11px] ${
                   isMine
                     ? "bg-[var(--accent)]/8 border-[var(--accent)]/30"
                     : "bg-[var(--background)]/50 border-[var(--border)]"
                 }`}
               >
-                {isLeader && (
+                <div className="flex items-center gap-1 leading-none">
+                  {isLeader && (
+                    <span
+                      className="text-[11px]"
+                      title="Líder da PT"
+                      aria-label="Líder"
+                    >
+                      👑
+                    </span>
+                  )}
                   <span
-                    className="text-sm leading-none"
-                    title="Líder da PT"
-                    aria-label="Líder"
+                    className={`font-semibold ${
+                      VOC_COLORS[m.vocation] ?? "text-[var(--text-mute)]"
+                    }`}
                   >
-                    👑
+                    {m.vocation}
                   </span>
-                )}
-                <span
-                  className={`font-semibold w-7 ${
-                    VOC_COLORS[m.vocation] ?? "text-[var(--text-mute)]"
-                  }`}
-                >
-                  {m.vocation}
+                </div>
+                <span className="w-full text-center truncate font-medium">
+                  {m.name}
                 </span>
-                <span className="flex-1 truncate">{m.name}</span>
-                <span className="text-[var(--text-mute)]">{m.level}</span>
+                <span className="text-[var(--text-mute)] text-[10px]">
+                  {m.level}
+                </span>
               </div>
             );
           });
+          // Preenche restante com slots travados (cinza translúcido)
+          for (let i = ordered.length; i < PARTY_CAP; i++) {
+            cells.push(
+              <div
+                key={`lock_${i}`}
+                className="flex items-center justify-center aspect-square border border-dashed border-[var(--border)] rounded bg-[var(--background)]/20 text-[var(--text-dim)]/60"
+                title="Vaga aberta"
+                aria-label="Vaga aberta"
+              >
+                <span className="text-base opacity-50">🔒</span>
+              </div>
+            );
+          }
+          return cells;
         })()}
       </div>
     </div>
