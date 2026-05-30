@@ -592,34 +592,30 @@ function HuntPartyCard({
             return (
               <div
                 key={m.characterId}
-                className={`flex flex-col items-center justify-center gap-0.5 h-10 px-1 py-1 border rounded text-[11px] ${
+                className={`flex items-center gap-1.5 h-9 px-2 border rounded text-[11px] ${
                   isMine
                     ? "bg-[var(--accent)]/8 border-[var(--accent)]/30"
                     : "bg-[var(--background)]/50 border-[var(--border)]"
                 }`}
               >
-                <div className="flex items-center gap-1 leading-none">
-                  {isLeader && (
-                    <span
-                      className="text-[11px]"
-                      title="Líder da PT"
-                      aria-label="Líder"
-                    >
-                      👑
-                    </span>
-                  )}
+                {isLeader && (
                   <span
-                    className={`font-semibold ${
-                      VOC_COLORS[m.vocation] ?? "text-[var(--text-mute)]"
-                    }`}
+                    className="text-[12px] leading-none"
+                    title="Líder da PT"
+                    aria-label="Líder"
                   >
-                    {m.vocation}
+                    👑
                   </span>
-                </div>
-                <span className="w-full text-center truncate font-medium">
-                  {m.name}
+                )}
+                <span
+                  className={`font-semibold shrink-0 ${
+                    VOC_COLORS[m.vocation] ?? "text-[var(--text-mute)]"
+                  }`}
+                >
+                  {m.vocation}
                 </span>
-                <span className="text-[var(--text-mute)] text-[10px]">
+                <span className="flex-1 truncate font-medium">{m.name}</span>
+                <span className="text-[var(--text-mute)] text-[10px] shrink-0">
                   {m.level}
                 </span>
               </div>
@@ -630,7 +626,7 @@ function HuntPartyCard({
             cells.push(
               <div
                 key={`lock_${i}`}
-                className="flex items-center justify-center h-10 border border-dashed border-[var(--border)] rounded bg-[var(--background)]/20 text-[var(--text-dim)]/60"
+                className="flex items-center justify-center h-9 border border-dashed border-[var(--border)] rounded bg-[var(--background)]/20 text-[var(--text-dim)]/60"
                 title="Vaga aberta"
                 aria-label="Vaga aberta"
               >
