@@ -8,12 +8,24 @@ import { HuntPartyModal } from "@/app/(components)/HuntPartyModal";
 import {
   HuntParty,
   HuntPartyMember,
+  addMemberToHuntParty,
   createHuntParty,
   deleteHuntParty,
   fetchAllCharactersOnce,
+  HUNT_PARTY_MAX_SIZE,
   HUNT_PARTY_MIN_SIZE,
+  leaveHuntParty,
+  removeMemberFromHuntParty,
   subscribeToAllHuntParties,
+  transferLeadershipAndLeaveHuntParty,
+  transferLeadershipHuntParty,
 } from "@/lib/hunts";
+import {
+  AddMemberModal,
+  LeaderLeaveModal,
+  LeavePartyModal,
+  TransferLeadershipModal,
+} from "@/app/(components)/HuntPartyManage";
 import {
   HUNT_GROUP_LABELS,
   HUNT_GROUP_ORDER,
@@ -102,16 +114,16 @@ export default function PlanilhadoPage() {
           level: c.level,
         });
         seenOwners.add(c.ownerId);
-        if (picked.length >= HUNT_PARTY_MIN_SIZE) break;
+        if (picked.length >= HUNT_PARTY_MAX_SIZE) break;
       }
 
-      // Completa com dummies sintéticos até atingir HUNT_PARTY_MIN_SIZE
+      // Completa com dummies sintéticos até atingir HUNT_PARTY_MAX_SIZE
       const FAKE_NAMES = [
         "Bagunça", "Daxto", "Xulipa", "Erebos", "Gnomo", "Soxinha",
         "Renno", "Faisca", "Korben", "Vortek", "Ziggu", "Mauron",
       ];
       const FAKE_VOCS: HuntPartyMember["vocation"][] = ["EK", "ED", "RP", "MS", "EM"];
-      while (picked.length < HUNT_PARTY_MIN_SIZE) {
+      while (picked.length < HUNT_PARTY_MAX_SIZE) {
         const stamp = `${Date.now()}_${Math.floor(Math.random() * 10000)}`;
         const name =
           FAKE_NAMES[Math.floor(Math.random() * FAKE_NAMES.length)] +
@@ -531,7 +543,57 @@ function HuntPartyCard({
   const isOwner = party.ownerId === currentUid;
   const imIn = party.members.some((m) => m.ownerId === currentUid);
   const canDelete = isOwner || isAdmin;
+  const canManage = isOwner || isAdmin;
   const leader = party.members.find((m) => m.ownerId === party.ownerId);
+
+  const [modal, setModal] = useState<
+    "leave" | "leader-leave" | "transfer" | "add" | null
+  >(null);
+  const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  const wrap = async (fn: () => Promise<void>) => {
+    setBusy(true);
+    setActionError(null);
+    try {
+      await fn();
+      setModal(null);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Erro.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleRemove = (characterId: string) =>
+    wrap(() =>
+      removeMemberFromHuntParty(party.id, party, characterId, currentUid, isAdmin)
+    );
+
+  const handleLeave = () =>
+    wrap(() => leaveHuntParty(party.id, party, currentUid));
+
+  const handleLeaderLeave = (newOwnerUid: string) =>
+    wrap(() =>
+      transferLeadershipAndLeaveHuntParty(
+        party.id,
+        party,
+        newOwnerUid,
+        currentUid,
+        isAdmin
+      )
+    );
+
+  const handleTransfer = (newOwnerUid: string) =>
+    wrap(() =>
+      transferLeadershipHuntParty(party.id, party, newOwnerUid, currentUid, isAdmin)
+    );
+
+  const handleAdd = (member: HuntPartyMember) =>
+    wrap(() => addMemberToHuntParty(party.id, party, member, currentUid, isAdmin));
+
+  const canAddMore = party.members.length < HUNT_PARTY_MAX_SIZE;
+  const canShrink = party.members.length > HUNT_PARTY_MIN_SIZE;
 
   return (
     <div className="bg-[var(--background-elev)] border border-[var(--border)] rounded-lg p-4">
@@ -563,23 +625,82 @@ function HuntPartyCard({
             </span>
           )}
         </div>
-        {canDelete && (
-          <button
-            type="button"
-            onClick={onDelete}
-            disabled={deleting}
-            className="text-xs text-[var(--text-mute)] hover:text-red-400 border border-[var(--border-strong)] hover:border-red-400/40 rounded-md px-2.5 py-1 transition disabled:opacity-50 shrink-0"
-            title={!isOwner ? "Admin: deletar PT alheia" : "Deletar PT"}
-          >
-            {deleting ? "Deletando..." : "Deletar"}
-          </button>
-        )}
+        <div className="flex items-center gap-1.5 shrink-0">
+          {canManage && canAddMore && (
+            <button
+              type="button"
+              onClick={() => setModal("add")}
+              disabled={busy}
+              className="text-xs text-[var(--accent)] border border-[var(--accent)]/40 hover:bg-[var(--accent)]/10 rounded-md px-2.5 py-1 transition disabled:opacity-50"
+              title="Adicionar player"
+            >
+              + Adicionar
+            </button>
+          )}
+          {canManage && (
+            <button
+              type="button"
+              onClick={() => setModal("transfer")}
+              disabled={busy || party.members.length < 2}
+              className="text-xs text-[var(--text-mute)] hover:text-[var(--text)] border border-[var(--border-strong)] hover:border-[var(--accent-dim)] rounded-md px-2.5 py-1 transition disabled:opacity-50"
+              title="Passar liderança"
+            >
+              ↻ Liderança
+            </button>
+          )}
+          {isOwner && (
+            <button
+              type="button"
+              onClick={() => setModal("leader-leave")}
+              disabled={busy || !canShrink}
+              className="text-xs text-red-400 hover:text-red-300 border border-red-400/40 hover:bg-red-500/10 rounded-md px-2.5 py-1 transition disabled:opacity-50"
+              title={
+                !canShrink
+                  ? `PT no mínimo (${HUNT_PARTY_MIN_SIZE}). Adicione alguém antes de sair.`
+                  : "Sair da PT (transferir liderança antes)"
+              }
+            >
+              Sair
+            </button>
+          )}
+          {imIn && !isOwner && (
+            <button
+              type="button"
+              onClick={() => setModal("leave")}
+              disabled={busy || !canShrink}
+              className="text-xs text-red-400 hover:text-red-300 border border-red-400/40 hover:bg-red-500/10 rounded-md px-2.5 py-1 transition disabled:opacity-50"
+              title={
+                !canShrink
+                  ? `PT no mínimo (${HUNT_PARTY_MIN_SIZE}). Não dá pra sair agora.`
+                  : "Sair da PT"
+              }
+            >
+              Sair
+            </button>
+          )}
+          {canDelete && (
+            <button
+              type="button"
+              onClick={onDelete}
+              disabled={deleting}
+              className="text-xs text-[var(--text-mute)] hover:text-red-400 border border-[var(--border-strong)] hover:border-red-400/40 rounded-md px-2.5 py-1 transition disabled:opacity-50"
+              title={!isOwner ? "Admin: deletar PT alheia" : "Deletar PT"}
+            >
+              {deleting ? "Deletando..." : "Deletar"}
+            </button>
+          )}
+        </div>
       </div>
+
+      {actionError && (
+        <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-xs rounded-md px-3 py-2 mb-2">
+          {actionError}
+        </div>
+      )}
 
       <div className="grid grid-cols-5 gap-1.5">
         {(() => {
-          const PARTY_CAP = 5;
-          // Líder (ownerId == party.ownerId) sempre primeiro
+          // Líder primeiro
           const leaderIdx = party.members.findIndex(
             (m) => m.ownerId === party.ownerId
           );
@@ -593,10 +714,11 @@ function HuntPartyCard({
           const cells: React.ReactNode[] = ordered.map((m) => {
             const isMine = m.ownerId === currentUid;
             const isLeader = m.ownerId === party.ownerId;
+            const showRemove = canManage && !isLeader && canShrink;
             return (
               <div
                 key={m.characterId}
-                className={`flex items-center gap-1.5 h-12 px-2.5 border rounded text-xs ${
+                className={`relative flex items-center gap-1.5 h-12 px-2.5 border rounded text-xs group ${
                   isMine
                     ? "bg-[var(--accent)]/8 border-[var(--accent)]/30"
                     : "bg-[var(--background)]/50 border-[var(--border)]"
@@ -622,25 +744,77 @@ function HuntPartyCard({
                 <span className="text-[var(--text-mute)] text-[10px] shrink-0">
                   {m.level}
                 </span>
+                {showRemove && (
+                  <button
+                    type="button"
+                    onClick={() => handleRemove(m.characterId)}
+                    disabled={busy}
+                    className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-red-500/80 hover:bg-red-500 text-white text-xs leading-none opacity-0 group-hover:opacity-100 transition disabled:opacity-50"
+                    title={`Remover ${m.name}`}
+                    aria-label="Remover"
+                  >
+                    ×
+                  </button>
+                )}
               </div>
             );
           });
-          // Preenche restante com slots travados (cinza translúcido)
-          for (let i = ordered.length; i < PARTY_CAP; i++) {
+          // Vagas abertas (cadeado)
+          for (let i = ordered.length; i < HUNT_PARTY_MAX_SIZE; i++) {
+            const clickable = canManage;
             cells.push(
-              <div
+              <button
                 key={`lock_${i}`}
-                className="flex items-center justify-center h-12 border border-dashed border-[var(--border)] rounded bg-[var(--background)]/20 text-[var(--text-dim)]/60"
-                title="Vaga aberta"
-                aria-label="Vaga aberta"
+                type="button"
+                onClick={clickable ? () => setModal("add") : undefined}
+                disabled={!clickable || busy}
+                className={`flex items-center justify-center gap-1 h-12 border border-dashed border-[var(--border)] rounded bg-[var(--background)]/20 text-[var(--text-dim)]/60 transition ${
+                  clickable
+                    ? "hover:border-[var(--accent)]/40 hover:text-[var(--accent)] cursor-pointer"
+                    : "cursor-default"
+                }`}
+                title={clickable ? "Adicionar player" : "Vaga aberta"}
               >
                 <span className="text-base opacity-50">🔒</span>
-              </div>
+                {clickable && <span className="text-[10px]">+</span>}
+              </button>
             );
           }
           return cells;
         })()}
       </div>
+
+      {modal === "leave" && (
+        <LeavePartyModal
+          onClose={() => setModal(null)}
+          onConfirm={handleLeave}
+          busy={busy}
+        />
+      )}
+      {modal === "leader-leave" && (
+        <LeaderLeaveModal
+          party={party}
+          onClose={() => setModal(null)}
+          onConfirm={handleLeaderLeave}
+          busy={busy}
+        />
+      )}
+      {modal === "transfer" && (
+        <TransferLeadershipModal
+          party={party}
+          onClose={() => setModal(null)}
+          onConfirm={handleTransfer}
+          busy={busy}
+        />
+      )}
+      {modal === "add" && (
+        <AddMemberModal
+          party={party}
+          onClose={() => setModal(null)}
+          onConfirm={handleAdd}
+          busy={busy}
+        />
+      )}
     </div>
   );
 }

@@ -23,12 +23,14 @@ import {
   query,
   serverTimestamp,
   Timestamp,
+  updateDoc,
   where,
 } from "firebase/firestore";
 import { db } from "./firebase";
 import { Character, Vocation } from "./characters";
 
-export const HUNT_PARTY_MIN_SIZE = 5;
+export const HUNT_PARTY_MIN_SIZE = 4;
+export const HUNT_PARTY_MAX_SIZE = 5;
 
 export type HuntPartyMember = {
   characterId: string;
@@ -79,6 +81,9 @@ export function validateHuntComposition(
 ): string | null {
   if (members.length < HUNT_PARTY_MIN_SIZE) {
     return `A PT precisa de no mínimo ${HUNT_PARTY_MIN_SIZE} personagens.`;
+  }
+  if (members.length > HUNT_PARTY_MAX_SIZE) {
+    return `A PT pode ter no máximo ${HUNT_PARTY_MAX_SIZE} personagens.`;
   }
 
   // Server-cross-check fica a cargo do caller (que tem acesso ao Character.server).
@@ -142,6 +147,177 @@ export async function createHuntParty(
 
 export async function deleteHuntParty(id: string) {
   await deleteDoc(doc(db, "huntParties", id));
+}
+
+/* ───────── Gestão de members (líder/admin) ───────── */
+
+/**
+ * Confere se o user tem autoridade pra modificar a PT (líder dela ou admin).
+ * Lança erro se não tiver.
+ */
+function assertCanManage(
+  party: HuntParty,
+  actingUid: string,
+  isAdmin: boolean
+) {
+  if (isAdmin) return;
+  if (party.ownerId !== actingUid) {
+    throw new Error("Só o líder da PT pode fazer essa ação.");
+  }
+}
+
+function serializeMembers(members: HuntPartyMember[]): Record<string, unknown>[] {
+  return members.map((m) => ({
+    characterId: m.characterId,
+    ownerId: m.ownerId,
+    name: m.name,
+    vocation: m.vocation,
+    level: m.level,
+  }));
+}
+
+/**
+ * Líder/admin remove um member da PT. Não pode remover o próprio líder
+ * (esse fluxo é via transferLeadershipAndLeave). Min size respeitado.
+ */
+export async function removeMemberFromHuntParty(
+  partyId: string,
+  party: HuntParty,
+  characterId: string,
+  actingUid: string,
+  isAdmin: boolean
+) {
+  assertCanManage(party, actingUid, isAdmin);
+  const target = party.members.find((m) => m.characterId === characterId);
+  if (!target) throw new Error("Membro não encontrado na PT.");
+  if (target.ownerId === party.ownerId) {
+    throw new Error(
+      "Não dá pra remover o líder direto — use 'Sair da PT' ou 'Transferir liderança'."
+    );
+  }
+  const next = party.members.filter((m) => m.characterId !== characterId);
+  if (next.length < HUNT_PARTY_MIN_SIZE) {
+    throw new Error(
+      `PT ficaria com ${next.length} chars (mínimo é ${HUNT_PARTY_MIN_SIZE}). Adicione alguém antes de remover.`
+    );
+  }
+  await updateDoc(doc(db, "huntParties", partyId), {
+    members: serializeMembers(next),
+    levelTop4Avg: calcLevelTop4Avg(next),
+    updatedAt: serverTimestamp(),
+  });
+}
+
+/**
+ * Líder/admin adiciona um novo member. Valida cap, server, char/owner único.
+ */
+export async function addMemberToHuntParty(
+  partyId: string,
+  party: HuntParty,
+  newMember: HuntPartyMember,
+  actingUid: string,
+  isAdmin: boolean
+) {
+  assertCanManage(party, actingUid, isAdmin);
+  if (party.members.length >= HUNT_PARTY_MAX_SIZE) {
+    throw new Error(`PT já está cheia (${HUNT_PARTY_MAX_SIZE} chars).`);
+  }
+  if (party.members.some((m) => m.characterId === newMember.characterId)) {
+    throw new Error("Esse personagem já está na PT.");
+  }
+  if (party.members.some((m) => m.ownerId === newMember.ownerId)) {
+    throw new Error("Esse player já tem outro char na PT.");
+  }
+  const next = [...party.members, newMember];
+  await updateDoc(doc(db, "huntParties", partyId), {
+    members: serializeMembers(next),
+    levelTop4Avg: calcLevelTop4Avg(next),
+    updatedAt: serverTimestamp(),
+  });
+}
+
+/**
+ * Member não-líder sai da PT. Líder não pode usar — tem que transferir
+ * primeiro via transferLeadershipAndLeave. Respeita min size.
+ */
+export async function leaveHuntParty(
+  partyId: string,
+  party: HuntParty,
+  leavingOwnerId: string
+) {
+  if (party.ownerId === leavingOwnerId) {
+    throw new Error(
+      "Líder não pode sair direto — transfira a liderança antes."
+    );
+  }
+  const target = party.members.find((m) => m.ownerId === leavingOwnerId);
+  if (!target) throw new Error("Você não está nessa PT.");
+  const next = party.members.filter((m) => m.ownerId !== leavingOwnerId);
+  if (next.length < HUNT_PARTY_MIN_SIZE) {
+    throw new Error(
+      `PT ficaria com ${next.length} chars (mínimo é ${HUNT_PARTY_MIN_SIZE}).`
+    );
+  }
+  await updateDoc(doc(db, "huntParties", partyId), {
+    members: serializeMembers(next),
+    levelTop4Avg: calcLevelTop4Avg(next),
+    updatedAt: serverTimestamp(),
+  });
+}
+
+/**
+ * Líder transfere liderança pra outro member e SAI da PT (combo atômico).
+ * Min size respeitado após a saída.
+ */
+export async function transferLeadershipAndLeaveHuntParty(
+  partyId: string,
+  party: HuntParty,
+  newOwnerUid: string,
+  actingUid: string,
+  isAdmin: boolean
+) {
+  assertCanManage(party, actingUid, isAdmin);
+  if (newOwnerUid === party.ownerId) {
+    throw new Error("Escolha outro player pra ser o líder.");
+  }
+  const newLeader = party.members.find((m) => m.ownerId === newOwnerUid);
+  if (!newLeader) throw new Error("Novo líder precisa estar na PT.");
+  const next = party.members.filter((m) => m.ownerId !== party.ownerId);
+  if (next.length < HUNT_PARTY_MIN_SIZE) {
+    throw new Error(
+      `PT ficaria com ${next.length} chars (mínimo é ${HUNT_PARTY_MIN_SIZE}).`
+    );
+  }
+  await updateDoc(doc(db, "huntParties", partyId), {
+    ownerId: newOwnerUid,
+    members: serializeMembers(next),
+    levelTop4Avg: calcLevelTop4Avg(next),
+    updatedAt: serverTimestamp(),
+  });
+}
+
+/**
+ * Líder passa liderança pra outro member mas continua na PT.
+ * Sem confirmações extras — só troca o ownerId.
+ */
+export async function transferLeadershipHuntParty(
+  partyId: string,
+  party: HuntParty,
+  newOwnerUid: string,
+  actingUid: string,
+  isAdmin: boolean
+) {
+  assertCanManage(party, actingUid, isAdmin);
+  if (newOwnerUid === party.ownerId) {
+    throw new Error("Escolha outro player pra ser o líder.");
+  }
+  if (!party.members.some((m) => m.ownerId === newOwnerUid)) {
+    throw new Error("Novo líder precisa estar na PT.");
+  }
+  await updateDoc(doc(db, "huntParties", partyId), {
+    ownerId: newOwnerUid,
+    updatedAt: serverTimestamp(),
+  });
 }
 
 function mapHuntParty(snap: { id: string; data: () => Record<string, unknown> }): HuntParty {
